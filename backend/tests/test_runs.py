@@ -41,7 +41,7 @@ async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user
     
     Verifies:
     - API returns all fields (name, description, status, user_id)
-    - Initial status is "created"
+    - Initial status is "running" (default)
     - Task counts start at 0
     
     Cleanup: Automatic via db fixture (try/finally)
@@ -61,7 +61,7 @@ async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user
         data = response.json()
         assert data["name"] == "Test Run"
         assert data["description"] == "Testing run creation"
-        assert data["status"] == "created", "Initial status should be 'created'"
+        assert data["status"] == "running", "Default status should be 'running'"
         assert data["user_id"] == str(test_user.id)
         assert data["total_tasks"] == 0, "New run should have 0 tasks"
         

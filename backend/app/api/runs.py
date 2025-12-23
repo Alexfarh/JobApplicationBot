@@ -7,7 +7,7 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
@@ -62,7 +62,7 @@ async def get_run_by_id(run_id: str, user_id: str, db: AsyncSession) -> Applicat
     return run
 
 
-async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> RunResponse:
+async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> "RunResponse":
     """
     Convert an ApplicationRun to RunResponse with task counts.
     
@@ -89,6 +89,7 @@ async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> Run
         created_at=run.created_at,
         started_at=run.started_at,
         completed_at=run.completed_at,
+        updated_at=run.updated_at,
         total_tasks=len(tasks),
         queued_tasks=sum(1 for t in tasks if t.state == "QUEUED"),
         running_tasks=sum(1 for t in tasks if t.state == "RUNNING"),
@@ -108,12 +109,13 @@ class RunResponse(BaseModel):
     """Response with run details."""
     id: str
     user_id: str
-    name: str
+    name: Optional[str]
     description: Optional[str]
     status: str
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
+    updated_at: datetime
     
     # Task counts
     total_tasks: int = 0
@@ -122,8 +124,7 @@ class RunResponse(BaseModel):
     submitted_tasks: int = 0
     failed_tasks: int = 0
     
-    class Config:
-        from_attributes = True  # Allows creating from SQLAlchemy models
+    model_config = ConfigDict(from_attributes=True)  # Allows creating from SQLAlchemy models
 
 
 class RunListResponse(BaseModel):
@@ -149,8 +150,8 @@ async def create_run(
         run = ApplicationRun(
             user_id=UUID(user_id),
             name=request.name,
-            description=request.description,
-            status="created"
+            description=request.description
+            # status defaults to "running" from model
         )
         
         db.add(run)
@@ -166,6 +167,7 @@ async def create_run(
             created_at=run.created_at,
             started_at=run.started_at,
             completed_at=run.completed_at,
+            updated_at=run.updated_at,
         )
     
     except Exception as e:

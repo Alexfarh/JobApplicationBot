@@ -13,8 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine, Base
-# API routers will be imported here once created
-# from app.api import auth, runs, jobs, tasks, approvals, testing
+# Import API routers
+from app.api import auth, runs
 
 
 @asynccontextmanager
@@ -89,9 +89,9 @@ async def root():
     }
 
 
-# Register API routers (will be uncommented as we create them)
-# app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-# app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
+# Register API routers
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
 # app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 # app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 # app.include_router(approvals.router, prefix="/api/approvals", tags=["approvals"])
