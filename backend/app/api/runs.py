@@ -20,6 +20,83 @@ from app.models.application_task import ApplicationTask
 router = APIRouter()
 
 
+# Helper functions
+async def get_run_by_id(run_id: str, user_id: str, db: AsyncSession) -> ApplicationRun:
+    """
+    Get a run by ID and verify user owns it.
+    
+    Args:
+        run_id: Run UUID as string
+        user_id: User UUID as string
+        db: Database session
+        
+    Returns:
+        ApplicationRun object if found and owned by user
+        
+    Raises:
+        HTTPException 404: Run not found
+        HTTPException 403: User doesn't own the run
+    """
+    # First check if run exists at all
+    result = await db.execute(
+        select(ApplicationRun)
+        .where(ApplicationRun.id == UUID(run_id))
+    )
+    run = result.scalar_one_or_none()
+    
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail="Run not found. The run ID may be invalid."
+        )
+    
+    # Then check if user owns it
+    if str(run.user_id) != user_id:
+        # Log for debugging (server-side only, not sent to client)
+        print(f"⚠️  Access denied: User {user_id} tried to access run {run_id} owned by {run.user_id}")
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. You don't have permission to access this run."
+        )
+    
+    return run
+
+
+async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> RunResponse:
+    """
+    Convert an ApplicationRun to RunResponse with task counts.
+    
+    Args:
+        run: The ApplicationRun database object
+        db: Database session
+        
+    Returns:
+        RunResponse with all task counts populated
+    """
+    # Count tasks by state
+    task_result = await db.execute(
+        select(ApplicationTask)
+        .where(ApplicationTask.run_id == run.id)
+    )
+    tasks = task_result.scalars().all()
+    
+    return RunResponse(
+        id=str(run.id),
+        user_id=str(run.user_id),
+        name=run.name,
+        description=run.description,
+        status=run.status,
+        created_at=run.created_at,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        total_tasks=len(tasks),
+        queued_tasks=sum(1 for t in tasks if t.state == "QUEUED"),
+        running_tasks=sum(1 for t in tasks if t.state == "RUNNING"),
+        submitted_tasks=sum(1 for t in tasks if t.state == "SUBMITTED"),
+        failed_tasks=sum(1 for t in tasks if t.state == "FAILED"),
+    )
+
+
 # Pydantic schemas
 class CreateRunRequest(BaseModel):
     """Request to create a new application run."""
@@ -116,31 +193,11 @@ async def list_runs(
         )
         runs = result.scalars().all()
         
-        # Get task counts for each run
+        # Get task counts for each run using helper function
         run_responses = []
         for run in runs:
-            # Count tasks by state
-            task_result = await db.execute(
-                select(ApplicationTask)
-                .where(ApplicationTask.run_id == run.id)
-            )
-            tasks = task_result.scalars().all()
-            
-            run_responses.append(RunResponse(
-                id=str(run.id),
-                user_id=str(run.user_id),
-                name=run.name,
-                description=run.description,
-                status=run.status,
-                created_at=run.created_at,
-                started_at=run.started_at,
-                completed_at=run.completed_at,
-                total_tasks=len(tasks),
-                queued_tasks=sum(1 for t in tasks if t.state == "QUEUED"),
-                running_tasks=sum(1 for t in tasks if t.state == "RUNNING"),
-                submitted_tasks=sum(1 for t in tasks if t.state == "SUBMITTED"),
-                failed_tasks=sum(1 for t in tasks if t.state == "FAILED"),
-            ))
+            run_response = await get_run_with_task_counts(run, db)
+            run_responses.append(run_response)
         
         return RunListResponse(
             runs=run_responses,
@@ -165,43 +222,11 @@ async def get_run(
     Get details of a specific run.
     """
     try:
-        result = await db.execute(
-            select(ApplicationRun)
-            .where(
-                ApplicationRun.id == UUID(run_id),
-                ApplicationRun.user_id == UUID(user_id)
-            )
-        )
-        run = result.scalar_one_or_none()
+        # Get run and verify ownership
+        run = await get_run_by_id(run_id, user_id, db)
         
-        if not run:
-            raise HTTPException(
-                status_code=404,
-                detail="Run not found."
-            )
-        
-        # Count tasks
-        task_result = await db.execute(
-            select(ApplicationTask)
-            .where(ApplicationTask.run_id == run.id)
-        )
-        tasks = task_result.scalars().all()
-        
-        return RunResponse(
-            id=str(run.id),
-            user_id=str(run.user_id),
-            name=run.name,
-            description=run.description,
-            status=run.status,
-            created_at=run.created_at,
-            started_at=run.started_at,
-            completed_at=run.completed_at,
-            total_tasks=len(tasks),
-            queued_tasks=sum(1 for t in tasks if t.state == "QUEUED"),
-            running_tasks=sum(1 for t in tasks if t.state == "RUNNING"),
-            submitted_tasks=sum(1 for t in tasks if t.state == "SUBMITTED"),
-            failed_tasks=sum(1 for t in tasks if t.state == "FAILED"),
-        )
+        # Get task counts using helper function
+        return await get_run_with_task_counts(run, db)
     
     except HTTPException:
         raise
@@ -226,20 +251,8 @@ async def delete_run(
     Note: Tasks will be deleted via CASCADE constraint.
     """
     try:
-        result = await db.execute(
-            select(ApplicationRun)
-            .where(
-                ApplicationRun.id == UUID(run_id),
-                ApplicationRun.user_id == UUID(user_id)
-            )
-        )
-        run = result.scalar_one_or_none()
-        
-        if not run:
-            raise HTTPException(
-                status_code=404,
-                detail="Run not found."
-            )
+        # Get run and verify ownership
+        run = await get_run_by_id(run_id, user_id, db)
         
         await db.delete(run)
         await db.commit()
