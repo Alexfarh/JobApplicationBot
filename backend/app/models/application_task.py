@@ -1,10 +1,11 @@
 from datetime import datetime
 from enum import Enum
 from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, Index, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 import uuid
 
 from app.database import Base
+from app.database_types import GUID
 
 
 class TaskState(str, Enum):
@@ -23,8 +24,8 @@ class TaskState(str, Enum):
 class ApplicationTask(Base):
     __tablename__ = "application_tasks"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    run_id = Column(UUID(as_uuid=True), ForeignKey("application_runs.id"), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    run_id = Column(GUID, ForeignKey("application_runs.id"), nullable=False)
     job_id = Column(Integer, ForeignKey("job_postings.id"), nullable=False)
     
     # State machine
@@ -44,6 +45,9 @@ class ApplicationTask(Base):
     queued_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     started_at = Column(DateTime, nullable=True)
     last_state_change_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    
+    # Relationships
+    run = relationship("ApplicationRun", back_populates="tasks")
     
     __table_args__ = (
         # Prevent duplicate applications to same job in a run
