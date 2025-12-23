@@ -1,0 +1,98 @@
+"""
+FastAPI application entry point for JobApplicationBot.
+
+This is the main app that:
+- Initializes FastAPI with CORS
+- Registers all API routers
+- Provides health check endpoint
+- Sets up database connection lifecycle
+"""
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config import settings
+from app.database import engine, Base
+# API routers will be imported here once created
+# from app.api import auth, runs, jobs, tasks, approvals, testing
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events.
+    
+    On startup: Database connection is already handled by engine
+    On shutdown: Close database connections gracefully
+    """
+    # Startup
+    print("🚀 Starting JobApplicationBot API...")
+    print(f"📊 Database: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'configured'}")
+    print(f"🔧 Debug mode: {settings.debug}")
+    
+    yield
+    
+    # Shutdown
+    print("👋 Shutting down JobApplicationBot API...")
+    await engine.dispose()
+
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="JobApplicationBot API",
+    description="API for managing automated job applications",
+    version="1.0.0",
+    debug=settings.debug,
+    lifespan=lifespan,
+)
+
+# Configure CORS
+# In production, restrict this to your dashboard domain
+# Set ALLOWED_ORIGINS environment variable with comma-separated domains
+allowed_origins = [
+    "http://localhost:3000",  # Local development
+]
+
+# Add production origins from environment variable
+if hasattr(settings, 'allowed_origins') and settings.allowed_origins:
+    allowed_origins.extend(settings.allowed_origins.split(','))
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint."""
+    return {
+        "status": "healthy",
+        "service": "JobApplicationBot API",
+        "version": "1.0.0",
+    }
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """API root with basic info."""
+    return {
+        "message": "JobApplicationBot API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
+# Register API routers (will be uncommented as we create them)
+# app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+# app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
+# app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
+# app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
+# app.include_router(approvals.router, prefix="/api/approvals", tags=["approvals"])
+# app.include_router(testing.router, prefix="/api/_testing", tags=["testing"])

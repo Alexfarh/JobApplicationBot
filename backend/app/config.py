@@ -20,8 +20,22 @@ class Settings(BaseSettings):
     secret_key: str
     magic_link_ttl_minutes: int = 30
     
+    # CORS (comma-separated list of allowed origins)
+    allowed_origins: str = ""  # e.g., "https://yourdomain.com,https://app.yourdomain.com"
+    
+    # Frontend URL for magic links (defaults to first allowed_origin or localhost)
+    frontend_url: str = ""
+    
     # App
     debug: bool = False
+    
+    def get_frontend_url(self) -> str:
+        """Get frontend URL, falling back to first allowed_origin or localhost."""
+        if self.frontend_url:
+            return self.frontend_url
+        if self.allowed_origins:
+            return self.allowed_origins.split(',')[0].strip()
+        return "http://localhost:3000"
 
 
 settings = Settings()
