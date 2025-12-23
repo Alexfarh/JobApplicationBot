@@ -59,7 +59,7 @@ async def test_request_magic_link_new_user(async_client: AsyncClient, db: AsyncS
         user = result.scalar_one_or_none()
         assert user is not None, "User should be created in database"
         assert user.magic_link_token is not None, "Token should be generated"
-        assert user.token_expires_at is not None, "Expiry should be set"
+        assert user.magic_link_expires_at is not None, "Expiry should be set"
         
     except Exception as e:
         # If test fails, fixture still cleans up DB
@@ -140,7 +140,7 @@ async def test_verify_token_valid(async_client: AsyncClient, db: AsyncSession):
         # Setup: Create user with valid (non-expired) token
         user = User(email="test@example.com")
         user.magic_link_token = uuid4().hex
-        user.token_expires_at = datetime.utcnow() + timedelta(minutes=30)
+        user.magic_link_expires_at = datetime.utcnow() + timedelta(minutes=30)
         db.add(user)
         await db.commit()
         saved_token = user.magic_link_token
@@ -163,7 +163,7 @@ async def test_verify_token_valid(async_client: AsyncClient, db: AsyncSession):
         # Verify database state: magic link token cleared (one-time use)
         await db.refresh(user)
         assert user.magic_link_token is None, "Magic link token should be cleared after use"
-        assert user.token_expires_at is None, "Expiry should be cleared"
+        assert user.magic_link_expires_at is None, "Expiry should be cleared"
         
     except Exception as e:
         raise e
@@ -228,11 +228,11 @@ async def test_verify_token_invalid_with_users(async_client: AsyncClient, db: As
         # Setup: Create users with their own valid tokens
         user1 = User(email="user1@example.com")
         user1.magic_link_token = uuid4().hex
-        user1.token_expires_at = datetime.utcnow() + timedelta(minutes=30)
+        user1.magic_link_expires_at = datetime.utcnow() + timedelta(minutes=30)
         
         user2 = User(email="user2@example.com")
         user2.magic_link_token = uuid4().hex
-        user2.token_expires_at = datetime.utcnow() + timedelta(minutes=30)
+        user2.magic_link_expires_at = datetime.utcnow() + timedelta(minutes=30)
         
         db.add_all([user1, user2])
         await db.commit()
@@ -276,7 +276,7 @@ async def test_verify_token_expired(async_client: AsyncClient, db: AsyncSession)
         # Setup: Create user with expired token (1 minute ago)
         user = User(email="expired@example.com")
         user.magic_link_token = uuid4().hex
-        user.token_expires_at = datetime.utcnow() - timedelta(minutes=1)
+        user.magic_link_expires_at = datetime.utcnow() - timedelta(minutes=1)
         db.add(user)
         await db.commit()
         expired_token = user.magic_link_token

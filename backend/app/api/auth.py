@@ -74,7 +74,7 @@ async def request_magic_link(
         
         # Generate magic link token
         user.magic_link_token = uuid4().hex
-        user.token_expires_at = datetime.utcnow() + timedelta(
+        user.magic_link_expires_at = datetime.utcnow() + timedelta(
             minutes=settings.magic_link_ttl_minutes
         )
         
@@ -90,7 +90,7 @@ async def request_magic_link(
             print("="*60)
             print(f"Email: {user.email}")
             print(f"Link:  {magic_link}")
-            print(f"Expires: {user.token_expires_at}")
+            print(f"Expires: {user.magic_link_expires_at}")
             print("="*60 + "\n")
         else:
             # Production: send email
@@ -143,10 +143,10 @@ async def verify_token(
             )
         
         # Validate token not expired
-        if user.token_expires_at < datetime.utcnow():
+        if user.magic_link_expires_at < datetime.utcnow():
             # Clear expired token
             user.magic_link_token = None
-            user.token_expires_at = None
+            user.magic_link_expires_at = None
             await db.commit()
             
             raise HTTPException(
@@ -156,7 +156,7 @@ async def verify_token(
         
         # Token is valid - clear it (one-time use)
         user.magic_link_token = None
-        user.token_expires_at = None
+        user.magic_link_expires_at = None
         await db.commit()
         
         # In a real app, generate JWT here
