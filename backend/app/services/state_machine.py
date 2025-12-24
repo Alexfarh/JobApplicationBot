@@ -31,9 +31,9 @@ ALLOWED_TRANSITIONS: Dict[TaskState, list[TaskState]] = {
     TaskState.NEEDS_USER: [TaskState.QUEUED],  # After user provides input
     TaskState.PENDING_APPROVAL: [TaskState.APPROVED, TaskState.EXPIRED],
     TaskState.APPROVED: [TaskState.RUNNING, TaskState.EXPIRED],  # Worker interrupts to process; can expire if session lost
-    TaskState.FAILED: [],  # Terminal state (after auto-retry exhausted)
+    TaskState.FAILED: [TaskState.QUEUED],  # Manual resume only (after auto-retry exhausted)
     TaskState.SUBMITTED: [],  # Terminal state
-    TaskState.EXPIRED: [],  # Terminal state
+    TaskState.EXPIRED: [TaskState.QUEUED],  # Manual resume for expired approvals
 }
 
 
@@ -45,6 +45,7 @@ class InvalidTransitionError(Exception):
 async def transition_task(
     db: AsyncSession,
     task_id: str,
+    from_state: Optional[TaskState],
     to_state: TaskState,
     metadata: Optional[Dict[str, Any]] = None
 ) -> ApplicationTask:
@@ -54,6 +55,7 @@ async def transition_task(
     Args:
         db: Database session
         task_id: ID of the task to transition
+        from_state: Expected current state (for optimistic locking). None means skip validation (initial state).
         to_state: Target state
         metadata: Optional metadata about the transition (error info, etc.)
     
@@ -62,6 +64,7 @@ async def transition_task(
         
     Raises:
         InvalidTransitionError: If transition is not allowed
+        ValueError: If task not found or from_state doesn't match
     """
     # Fetch the task
     result = await db.execute(
@@ -72,12 +75,22 @@ async def transition_task(
     if not task:
         raise ValueError(f"Task {task_id} not found")
     
-    from_state = TaskState(task.state)
+    current_state = TaskState(task.state)
+    
+    # Optimistic locking: verify the task is still in the expected state
+    # Skip validation if from_state is None (initial state / no lock needed)
+    if from_state is not None and current_state != from_state:
+        raise ValueError(
+            f"Task {task_id} is in state {current_state.value}, expected {from_state.value}"
+        )
+    
+    # Use current_state for transition validation
+    transition_from = from_state if from_state is not None else current_state
     
     # Validate transition
-    if to_state not in ALLOWED_TRANSITIONS.get(from_state, []):
+    if to_state not in ALLOWED_TRANSITIONS.get(transition_from, []):
         raise InvalidTransitionError(
-            f"Invalid transition from {from_state.value} to {to_state.value}"
+            f"Invalid transition from {transition_from.value} to {to_state.value}"
         )
     
     # Update task state
@@ -130,7 +143,7 @@ async def transition_task(
     # Log transition with metadata
     log_data = {
         "task_id": str(task_id),
-        "from_state": from_state.value,
+        "from_state": transition_from.value,
         "to_state": to_state.value,
         "attempt_count": task.attempt_count,
         "priority": task.priority,
@@ -138,7 +151,7 @@ async def transition_task(
     if metadata:
         log_data["metadata"] = metadata
     
-    logger.info(f"Task state transition: {from_state.value} → {to_state.value}", extra=log_data)
+    logger.info(f"Task state transition: {transition_from.value} → {to_state.value}", extra=log_data)
     
     return task
 

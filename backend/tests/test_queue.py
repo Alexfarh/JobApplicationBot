@@ -473,6 +473,7 @@ async def test_auto_retry_first_failure_goes_to_queued(
     task = await transition_task(
         db,
         str(running_task.id),
+        TaskState.RUNNING,
         TaskState.FAILED,
         metadata={"error_code": "TEST_ERROR", "error_message": "Test failure"}
     )
@@ -509,6 +510,7 @@ async def test_auto_retry_second_failure_stays_failed(
     task = await transition_task(
         db,
         str(running_task.id),
+        TaskState.RUNNING,
         TaskState.FAILED,
         metadata={"error_code": "TEST_ERROR", "error_message": "Test failure"}
     )
@@ -541,7 +543,7 @@ async def test_queued_to_running_increments_attempt_count(
     await db.refresh(queued_task)
     
     # Transition to RUNNING
-    task = await transition_task(db, str(queued_task.id), TaskState.RUNNING)
+    task = await transition_task(db, str(queued_task.id), None, TaskState.RUNNING)
     
     # attempt_count should increment
     assert task.state == TaskState.RUNNING.value
@@ -552,12 +554,12 @@ async def test_queued_to_running_increments_attempt_count(
 # ============================================================
 
 @pytest.mark.asyncio
-async def test_resume_failed_task_cannot_resume(
+async def test_resume_failed_task_succeeds(
     db: AsyncSession,
     application_run: ApplicationRun,
     job_posting: JobPosting
 ):
-    """Test that a FAILED task cannot be resumed (terminal state)."""
+    """Test that a FAILED task can be manually resumed (safety valve)."""
     # Create a FAILED task
     failed_task = ApplicationTask(
         run_id=str(application_run.id),
@@ -570,10 +572,11 @@ async def test_resume_failed_task_cannot_resume(
     await db.commit()
     await db.refresh(failed_task)
     
-    # Attempting to resume should raise InvalidTransitionError
-    from app.services.state_machine import InvalidTransitionError
-    with pytest.raises(InvalidTransitionError, match="Invalid transition from FAILED to QUEUED"):
-        await resume_task(db, str(failed_task.id))
+    # Manual resume should succeed (FAILED → QUEUED allowed for manual recovery)
+    resumed_task = await resume_task(db, str(failed_task.id))
+    
+    assert resumed_task.state == TaskState.QUEUED.value
+    assert resumed_task.priority == PRIORITY_RESUMED  # Priority boost
 
 
 @pytest.mark.asyncio

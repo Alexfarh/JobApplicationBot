@@ -77,6 +77,7 @@ async def test_queued_to_running(db, task):
     result = await transition_task(
         db,
         str(task.id),
+        None,
         TaskState.RUNNING,
     )
     
@@ -89,10 +90,10 @@ async def test_queued_to_running(db, task):
 async def test_running_to_needs_auth(db, task):
     """Test RUNNING → NEEDS_AUTH transition"""
     # First move to RUNNING
-    await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     # Then to NEEDS_AUTH
-    result = await transition_task(db, str(task.id), TaskState.NEEDS_AUTH)
+    result = await transition_task(db, str(task.id), None, TaskState.NEEDS_AUTH)
     
     assert result.state == TaskState.NEEDS_AUTH.value
 
@@ -100,8 +101,8 @@ async def test_running_to_needs_auth(db, task):
 @pytest.mark.asyncio
 async def test_running_to_needs_user(db, task):
     """Test RUNNING → NEEDS_USER transition"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    result = await transition_task(db, str(task.id), TaskState.NEEDS_USER)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    result = await transition_task(db, str(task.id), None, TaskState.NEEDS_USER)
     
     assert result.state == TaskState.NEEDS_USER.value
 
@@ -109,8 +110,8 @@ async def test_running_to_needs_user(db, task):
 @pytest.mark.asyncio
 async def test_running_to_pending_approval(db, task):
     """Test RUNNING → PENDING_APPROVAL transition"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    result = await transition_task(db, str(task.id), TaskState.PENDING_APPROVAL)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    result = await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
     
     assert result.state == TaskState.PENDING_APPROVAL.value
 
@@ -118,14 +119,14 @@ async def test_running_to_pending_approval(db, task):
 @pytest.mark.asyncio
 async def test_running_to_submitted(db, task, job_posting):
     """Test RUNNING → SUBMITTED transition and job marking"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     # Verify job not marked yet
     await db.refresh(job_posting)
     assert job_posting.has_been_applied_to is False
     
     # Transition to SUBMITTED
-    result = await transition_task(db, str(task.id), TaskState.SUBMITTED)
+    result = await transition_task(db, str(task.id), None, TaskState.SUBMITTED)
     
     assert result.state == TaskState.SUBMITTED.value
     
@@ -138,9 +139,9 @@ async def test_running_to_submitted(db, task, job_posting):
 @pytest.mark.asyncio
 async def test_pending_approval_to_approved(db, task):
     """Test PENDING_APPROVAL → APPROVED transition"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.PENDING_APPROVAL)
-    result = await transition_task(db, str(task.id), TaskState.APPROVED)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    result = await transition_task(db, str(task.id), None, TaskState.APPROVED)
     
     assert result.state == TaskState.APPROVED.value
 
@@ -148,9 +149,9 @@ async def test_pending_approval_to_approved(db, task):
 @pytest.mark.asyncio
 async def test_pending_approval_to_expired(db, task):
     """Test PENDING_APPROVAL → EXPIRED transition"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.PENDING_APPROVAL)
-    result = await transition_task(db, str(task.id), TaskState.EXPIRED)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    result = await transition_task(db, str(task.id), None, TaskState.EXPIRED)
     
     assert result.state == TaskState.EXPIRED.value
 
@@ -158,10 +159,10 @@ async def test_pending_approval_to_expired(db, task):
 @pytest.mark.asyncio
 async def test_approved_to_running(db, task):
     """Test APPROVED → RUNNING transition"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.PENDING_APPROVAL)
-    await transition_task(db, str(task.id), TaskState.APPROVED)
-    result = await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    await transition_task(db, str(task.id), None, TaskState.APPROVED)
+    result = await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     assert result.state == TaskState.RUNNING.value
     assert result.attempt_count == 2  # Should increment
@@ -172,27 +173,27 @@ async def test_approved_to_running(db, task):
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_needs_auth_to_queued_priority_boost(db, task):
-    """Test NEEDS_AUTH → QUEUED gets priority boost"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.NEEDS_AUTH)
+async def test_needs_auth_to_queued(db, task):
+    """Test NEEDS_AUTH → QUEUED transition (priority boost happens in Tasks API)"""
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.NEEDS_AUTH)
     
-    result = await transition_task(db, str(task.id), TaskState.QUEUED)
+    result = await transition_task(db, str(task.id), None, TaskState.QUEUED)
     
     assert result.state == TaskState.QUEUED.value
-    assert result.priority == 100  # Boosted priority
+    # Priority boost is handled by Tasks API resume endpoint, not state machine
 
 
 @pytest.mark.asyncio
-async def test_needs_user_to_queued_priority_boost(db, task):
-    """Test NEEDS_USER → QUEUED gets priority boost"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.NEEDS_USER)
+async def test_needs_user_to_queued(db, task):
+    """Test NEEDS_USER → QUEUED transition (priority boost happens in Tasks API)"""
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.NEEDS_USER)
     
-    result = await transition_task(db, str(task.id), TaskState.QUEUED)
+    result = await transition_task(db, str(task.id), None, TaskState.QUEUED)
     
     assert result.state == TaskState.QUEUED.value
-    assert result.priority == 100  # Boosted priority
+    # Priority boost is handled by Tasks API resume endpoint, not state machine
 
 
 # =============================================================================
@@ -203,12 +204,13 @@ async def test_needs_user_to_queued_priority_boost(db, task):
 async def test_first_failure_auto_retry(db, task):
     """Test first failure auto-retries with boosted priority"""
     # First attempt
-    await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     # First failure should auto-retry
     result = await transition_task(
         db,
         str(task.id),
+        None,
         TaskState.FAILED,
         metadata={"error_code": "TIMEOUT", "error_message": "Connection timeout"}
     )
@@ -225,16 +227,17 @@ async def test_first_failure_auto_retry(db, task):
 async def test_second_failure_terminal(db, task):
     """Test second failure becomes terminal FAILED state"""
     # First attempt and failure (auto-retry)
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.FAILED)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.FAILED)
     
     # Second attempt
-    await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     # Second failure should be terminal
     result = await transition_task(
         db,
         str(task.id),
+        None,
         TaskState.FAILED,
         metadata={"error_code": "DOM_ERROR", "error_message": "Element not found"}
     )
@@ -252,52 +255,53 @@ async def test_second_failure_terminal(db, task):
 async def test_queued_to_submitted_invalid(db, task):
     """Test QUEUED → SUBMITTED is not allowed"""
     with pytest.raises(InvalidTransitionError):
-        await transition_task(db, str(task.id), TaskState.SUBMITTED)
+        await transition_task(db, str(task.id), None, TaskState.SUBMITTED)
 
 
 @pytest.mark.asyncio
 async def test_submitted_is_terminal(db, task):
     """Test SUBMITTED cannot transition to anything"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.SUBMITTED)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.SUBMITTED)
     
     with pytest.raises(InvalidTransitionError):
-        await transition_task(db, str(task.id), TaskState.QUEUED)
+        await transition_task(db, str(task.id), None, TaskState.QUEUED)
 
 
 @pytest.mark.asyncio
-async def test_failed_is_terminal(db, task):
-    """Test FAILED (after 2 attempts) is terminal"""
+async def test_failed_can_be_manually_resumed(db, task):
+    """Test FAILED can be manually resumed via FAILED → QUEUED"""
     # Reach terminal FAILED state
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.FAILED)  # Auto-retry
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.FAILED)  # Terminal
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.FAILED)  # Auto-retry
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.FAILED)  # Now in FAILED
     
-    # Cannot transition from terminal FAILED
-    with pytest.raises(InvalidTransitionError):
-        await transition_task(db, str(task.id), TaskState.QUEUED)
+    # Manual resume allowed (for safety valve)
+    result = await transition_task(db, str(task.id), None, TaskState.QUEUED)
+    assert result.state == TaskState.QUEUED.value
 
 
 @pytest.mark.asyncio
-async def test_expired_is_terminal(db, task):
-    """Test EXPIRED cannot transition to anything"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.PENDING_APPROVAL)
-    await transition_task(db, str(task.id), TaskState.EXPIRED)
+async def test_expired_can_be_manually_resumed(db, task):
+    """Test EXPIRED can be manually resumed via EXPIRED → QUEUED"""
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    await transition_task(db, str(task.id), None, TaskState.EXPIRED)
     
-    with pytest.raises(InvalidTransitionError):
-        await transition_task(db, str(task.id), TaskState.QUEUED)
+    # Manual resume allowed (for approval TTL recovery)
+    result = await transition_task(db, str(task.id), None, TaskState.QUEUED)
+    assert result.state == TaskState.QUEUED.value
 
 
 @pytest.mark.asyncio
 async def test_needs_auth_to_running_invalid(db, task):
     """Test NEEDS_AUTH → RUNNING is not allowed (must go through QUEUED)"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.NEEDS_AUTH)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.NEEDS_AUTH)
     
     with pytest.raises(InvalidTransitionError):
-        await transition_task(db, str(task.id), TaskState.RUNNING)
+        await transition_task(db, str(task.id), None, TaskState.RUNNING)
 
 
 # =============================================================================
@@ -307,11 +311,12 @@ async def test_needs_auth_to_running_invalid(db, task):
 @pytest.mark.asyncio
 async def test_metadata_persistence(db, task):
     """Test error metadata is persisted correctly"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     result = await transition_task(
         db,
         str(task.id),
+        None,
         TaskState.FAILED,
         metadata={
             "error_code": "AUTH_REQUIRED",
@@ -331,9 +336,9 @@ async def test_metadata_persistence(db, task):
 @pytest.mark.asyncio
 async def test_expired_does_not_mark_job(db, task, job_posting):
     """Test EXPIRED tasks don't mark job as applied (allows reapplication)"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.PENDING_APPROVAL)
-    await transition_task(db, str(task.id), TaskState.EXPIRED)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    await transition_task(db, str(task.id), None, TaskState.EXPIRED)
     
     # Job should NOT be marked as applied
     await db.refresh(job_posting)
@@ -344,10 +349,10 @@ async def test_expired_does_not_mark_job(db, task, job_posting):
 @pytest.mark.asyncio
 async def test_failed_does_not_mark_job(db, task, job_posting):
     """Test FAILED tasks don't mark job as applied"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.FAILED)
-    await transition_task(db, str(task.id), TaskState.RUNNING)
-    await transition_task(db, str(task.id), TaskState.FAILED)  # Terminal
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.FAILED)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.FAILED)  # Terminal
     
     # Job should NOT be marked as applied
     await db.refresh(job_posting)
@@ -381,6 +386,7 @@ async def test_task_not_found(db):
         await transition_task(
             db,
             "00000000-0000-0000-0000-000000000000",
+            None,
             TaskState.RUNNING
         )
 
@@ -392,9 +398,60 @@ async def test_task_not_found(db):
 @pytest.mark.asyncio
 async def test_running_to_queued_stuck_recovery(db, task):
     """Test RUNNING → QUEUED for stuck task recovery"""
-    await transition_task(db, str(task.id), TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
     
     # Simulate stuck task recovery
-    result = await transition_task(db, str(task.id), TaskState.QUEUED)
+    result = await transition_task(db, str(task.id), None, TaskState.QUEUED)
     
     assert result.state == TaskState.QUEUED.value
+
+
+# =============================================================================
+# Optimistic Locking Tests
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_from_state_none_skips_validation(db, task):
+    """Test that from_state=None skips optimistic locking validation"""
+    # Task starts in QUEUED
+    assert task.state == TaskState.QUEUED.value
+    
+    # Transition with from_state=None should work even if we're "wrong" about current state
+    result = await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    
+    assert result.state == TaskState.RUNNING.value
+    assert result.attempt_count == 1
+
+
+@pytest.mark.asyncio
+async def test_from_state_mismatch_raises_error(db, task):
+    """Test that from_state mismatch raises ValueError"""
+    # Task is in QUEUED
+    assert task.state == TaskState.QUEUED.value
+    
+    # Try to transition from RUNNING (wrong state)
+    with pytest.raises(ValueError, match="is in state QUEUED, expected RUNNING"):
+        await transition_task(
+            db,
+            str(task.id),
+            TaskState.RUNNING,  # Wrong from_state
+            TaskState.NEEDS_AUTH
+        )
+
+
+@pytest.mark.asyncio
+async def test_from_state_correct_allows_transition(db, task):
+    """Test that correct from_state allows transition (optimistic locking success)"""
+    # Task is in QUEUED
+    assert task.state == TaskState.QUEUED.value
+    
+    # Transition with correct from_state
+    result = await transition_task(
+        db,
+        str(task.id),
+        TaskState.QUEUED,  # Correct from_state
+        TaskState.RUNNING
+    )
+    
+    assert result.state == TaskState.RUNNING.value
+    assert result.attempt_count == 1

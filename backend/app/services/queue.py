@@ -96,7 +96,8 @@ async def recover_stuck_tasks(
             await transition_task(
                 db,
                 str(task.id),
-                TaskState.FAILED,
+                TaskState.RUNNING,  # from_state
+                TaskState.FAILED,   # to_state
                 metadata={
                     "error_code": "MAX_ATTEMPTS_EXCEEDED",
                     "error_message": f"Task stuck in RUNNING state after {task.attempt_count} attempts"
@@ -105,7 +106,7 @@ async def recover_stuck_tasks(
             logger.warning(f"Task {task.id} FAILED after {task.attempt_count} attempts")
         else:
             # Still have attempts left - recover to QUEUED
-            await transition_task(db, str(task.id), TaskState.QUEUED)
+            await transition_task(db, str(task.id), TaskState.RUNNING, TaskState.QUEUED)
             logger.info(f"Recovered stuck task {task.id} (attempt {task.attempt_count}/{max_attempts})")
     
     return len(stuck_tasks)
@@ -133,9 +134,12 @@ async def resume_task(
     if not task:
         raise ValueError(f"Task {task_id} not found")
     
+    # Determine current state for optimistic locking
+    current_state = TaskState(task.state)
+    
     # Use transition_task to ensure state machine rules are followed
     # Priority boost and timestamp update happens in state machine
-    updated_task = await transition_task(db, task_id, TaskState.QUEUED)
+    updated_task = await transition_task(db, task_id, current_state, TaskState.QUEUED)
     
     # Manual resume gets extra priority boost (state machine handles NEEDS_AUTH/NEEDS_USER boost)
     updated_task.priority = PRIORITY_RESUMED
