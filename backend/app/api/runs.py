@@ -100,6 +100,7 @@ async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> "Ru
         running_tasks=sum(1 for t in tasks if t.state == "RUNNING"),
         submitted_tasks=sum(1 for t in tasks if t.state == "SUBMITTED"),
         failed_tasks=sum(1 for t in tasks if t.state == "FAILED"),
+        rejected_tasks=sum(1 for t in tasks if t.state == "REJECTED"),
     )
 
 
@@ -128,6 +129,7 @@ class RunResponse(BaseModel):
     running_tasks: int = 0
     submitted_tasks: int = 0
     failed_tasks: int = 0
+    rejected_tasks: int = 0
     
     model_config = ConfigDict(from_attributes=True)  # Allows creating from SQLAlchemy models
 

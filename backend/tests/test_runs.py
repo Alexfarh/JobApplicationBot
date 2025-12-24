@@ -483,11 +483,12 @@ async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSess
     Test: Get run WITH task counts (aggregated from tasks table)
     
     What happens:
-    1. Create run with 5 tasks in different states:
+    1. Create run with 6 tasks in different states:
        - 2 QUEUED
        - 1 RUNNING
        - 1 SUBMITTED
        - 1 FAILED
+       - 1 REJECTED
     2. GET /api/runs/{run_id} calls get_run_with_task_counts() helper
     3. Helper executes SQL query:
        SELECT state, COUNT(*) FROM application_tasks 
@@ -495,11 +496,12 @@ async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSess
     4. Returns counts as separate fields
     
     Verifies:
-    - total_tasks = 5 (sum of all states)
+    - total_tasks = 6 (sum of all states)
     - queued_tasks = 2
     - running_tasks = 1
     - submitted_tasks = 1
     - failed_tasks = 1
+    - rejected_tasks = 1
     
     This is CRITICAL for dashboard display: user sees how many tasks are
     in each state without loading all task records.
@@ -518,8 +520,9 @@ async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSess
         task3 = ApplicationTask(run_id=run.id, job_id=3, state=TaskState.RUNNING)
         task4 = ApplicationTask(run_id=run.id, job_id=4, state=TaskState.SUBMITTED)
         task5 = ApplicationTask(run_id=run.id, job_id=5, state=TaskState.FAILED)
+        task6 = ApplicationTask(run_id=run.id, job_id=6, state=TaskState.REJECTED)
         
-        db.add_all([task1, task2, task3, task4, task5])
+        db.add_all([task1, task2, task3, task4, task5, task6])
         await db.commit()
         
         # Make API request to get run with counts
@@ -528,11 +531,12 @@ async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSess
         # Verify API response includes accurate counts
         assert response.status_code == 200
         data = response.json()
-        assert data["total_tasks"] == 5, "Should count all tasks"
+        assert data["total_tasks"] == 6, "Should count all tasks"
         assert data["queued_tasks"] == 2, "Should count 2 queued tasks"
         assert data["running_tasks"] == 1, "Should count 1 running task"
         assert data["submitted_tasks"] == 1, "Should count 1 submitted task"
         assert data["failed_tasks"] == 1, "Should count 1 failed task"
+        assert data["rejected_tasks"] == 1, "Should count 1 rejected task"
         
     except Exception as e:
         raise e

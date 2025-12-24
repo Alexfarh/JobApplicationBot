@@ -19,6 +19,7 @@ class TaskState(str, Enum):
     SUBMITTED = "SUBMITTED"
     FAILED = "FAILED"
     EXPIRED = "EXPIRED"
+    REJECTED = "REJECTED"  # User explicitly rejected application submission
 
 
 class ApplicationTask(Base):

@@ -29,10 +29,11 @@ ALLOWED_TRANSITIONS: Dict[TaskState, list[TaskState]] = {
     ],
     TaskState.NEEDS_AUTH: [TaskState.QUEUED],  # After user completes auth
     TaskState.NEEDS_USER: [TaskState.QUEUED],  # After user provides input
-    TaskState.PENDING_APPROVAL: [TaskState.APPROVED, TaskState.EXPIRED],
+    TaskState.PENDING_APPROVAL: [TaskState.APPROVED, TaskState.EXPIRED, TaskState.REJECTED],
     TaskState.APPROVED: [TaskState.RUNNING, TaskState.EXPIRED],  # Worker interrupts to process; can expire if session lost
     TaskState.FAILED: [TaskState.QUEUED],  # Manual resume only (after auto-retry exhausted)
     TaskState.SUBMITTED: [],  # Terminal state
+    TaskState.REJECTED: [],  # Terminal state (user explicitly rejected)
     TaskState.EXPIRED: [TaskState.QUEUED],  # Manual resume for expired approvals
 }
 

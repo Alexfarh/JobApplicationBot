@@ -7,6 +7,7 @@ Validates:
 - Priority boosting logic
 - Auto-retry on first failure
 - Job marking only on SUBMITTED
+- REJECTED is terminal (user explicitly declined)
 - Metadata persistence
 """
 import pytest
@@ -292,6 +293,36 @@ async def test_expired_can_be_manually_resumed(db, task):
     # Manual resume allowed (for approval TTL recovery)
     result = await transition_task(db, str(task.id), None, TaskState.QUEUED)
     assert result.state == TaskState.QUEUED.value
+
+
+@pytest.mark.asyncio
+async def test_pending_approval_to_rejected(db, task):
+    """Test PENDING_APPROVAL → REJECTED when user declines submission"""
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    
+    # User rejects the application
+    result = await transition_task(
+        db,
+        str(task.id),
+        None,
+        TaskState.REJECTED,
+        metadata={"rejection_notes": "Job requirements don't match experience"}
+    )
+    
+    assert result.state == TaskState.REJECTED.value
+
+
+@pytest.mark.asyncio
+async def test_rejected_is_terminal(db, task):
+    """Test REJECTED is a terminal state (cannot transition anywhere)"""
+    await transition_task(db, str(task.id), None, TaskState.RUNNING)
+    await transition_task(db, str(task.id), None, TaskState.PENDING_APPROVAL)
+    await transition_task(db, str(task.id), None, TaskState.REJECTED)
+    
+    # Attempt to transition from REJECTED should fail
+    with pytest.raises(InvalidTransitionError):
+        await transition_task(db, str(task.id), None, TaskState.QUEUED)
 
 
 @pytest.mark.asyncio
