@@ -127,3 +127,16 @@ async def test_user(db: AsyncSession) -> User:
     await db.commit()
     await db.refresh(user)
     return user
+
+
+@pytest_asyncio.fixture
+async def client(async_client: AsyncClient, test_user: User) -> AsyncClient:
+    """
+    Authenticated client with Bearer token headers.
+    
+    Phase 1: Token is just the user_id.
+    Uses test_user fixture to ensure user exists.
+    """
+    # Add auth header to client
+    async_client.headers["Authorization"] = f"Bearer {test_user.id}"
+    return async_client

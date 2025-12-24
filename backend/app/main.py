@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
 # Import API routers
-from app.api import auth, runs
+from app.api import auth, runs, jobs
 
 # Configure logging
 logging.basicConfig(
@@ -100,7 +100,7 @@ async def root():
 # Register API routers
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(runs.router, prefix="/api/runs", tags=["runs"])
-# app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
+app.include_router(jobs.router, prefix="/api/jobs", tags=["jobs"])
 # app.include_router(tasks.router, prefix="/api/tasks", tags=["tasks"])
 # app.include_router(approvals.router, prefix="/api/approvals", tags=["approvals"])
 # app.include_router(testing.router, prefix="/api/_testing", tags=["testing"])

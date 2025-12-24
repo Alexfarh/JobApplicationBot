@@ -8,7 +8,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -43,6 +43,65 @@ class AuthResponse(BaseModel):
     user_id: str
     email: str
     token: str  # In real app, this would be a JWT
+
+
+# Authentication Dependency
+async def get_current_user(
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """
+    Dependency to get current authenticated user from token.
+    
+    Phase 1: Token is just the user_id (simple bearer token)
+    Future: Validate JWT and extract user_id
+    
+    Args:
+        authorization: Authorization header (format: "Bearer <token>")
+        db: Database session
+    
+    Returns:
+        User: The authenticated user
+    
+    Raises:
+        HTTPException 401: If token is invalid or user not found
+    """
+    # Extract token from "Bearer <token>" format
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization header format. Use: Bearer <token>"
+        )
+    
+    token = authorization[7:]  # Remove "Bearer " prefix
+    
+    # Phase 1: token is just the user_id
+    # Future: decode JWT and extract user_id
+    try:
+        user_id = token
+        
+        # Fetch user from database
+        result = await db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token. User not found."
+            )
+        
+        return user
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating token: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token."
+        )
 
 
 # Endpoints
