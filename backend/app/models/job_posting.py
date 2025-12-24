@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, Integer, Text, Boolean, DateTime
 from app.database import Base
+from app.database_types import JSON
 
 
 class JobPosting(Base):
@@ -23,6 +24,9 @@ class JobPosting(Base):
     # Description
     description_raw = Column(Text, nullable=True)
     description_clean = Column(Text, nullable=True)
+    
+    # Skills (list of strings)
+    skills = Column(JSON, nullable=True)  # e.g., ["Python", "React", "AWS"]
     
     # Application tracking (denormalized for fast duplicate detection)
     has_been_applied_to = Column(Boolean, default=False, nullable=False)

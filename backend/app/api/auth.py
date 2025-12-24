@@ -4,6 +4,7 @@ Authentication endpoints for magic link login.
 Phase 1: Dev mode - prints magic link to console
 Future: Send email with magic link
 """
+import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ from app.database import get_db
 from app.models.user import User
 from app.config import settings
 
-
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -85,13 +86,10 @@ async def request_magic_link(
         
         # Dev mode: print to console
         if settings.email_mode == "dev":
-            print("\n" + "="*60)
-            print("🔐 MAGIC LINK LOGIN")
-            print("="*60)
-            print(f"Email: {user.email}")
-            print(f"Link:  {magic_link}")
-            print(f"Expires: {user.magic_link_expires_at}")
-            print("="*60 + "\n")
+            logger.info(
+                f"Magic link generated for {user.email}: {magic_link} "
+                f"(expires: {user.magic_link_expires_at})"
+            )
         else:
             # Production: send email
             # TODO: Implement email sending in future phase
@@ -106,7 +104,7 @@ async def request_magic_link(
         # Rollback any pending database changes
         await db.rollback()
         # Log the error (in production, use proper logging)
-        print(f"❌ Error generating magic link: {str(e)}")
+        logger.error(f"Error generating magic link: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to generate magic link. Please try again."
@@ -175,7 +173,7 @@ async def verify_token(
     except Exception as e:
         # Catch any unexpected errors (database, network, etc.)
         await db.rollback()
-        print(f"❌ Error verifying token: {str(e)}")
+        logger.error(f"Error verifying token: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Authentication failed. Please try again."

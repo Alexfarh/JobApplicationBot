@@ -2,12 +2,16 @@
 Queue management service for application tasks.
 Handles dequeuing with SELECT FOR UPDATE SKIP LOCKED.
 """
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
 from app.models.application_task import ApplicationTask, TaskState
+from app.services.state_machine import transition_task
+
+logger = logging.getLogger(__name__)
 
 
 # Priority levels for queue ordering
@@ -85,22 +89,24 @@ async def recover_stuck_tasks(
     stuck_tasks = result.scalars().all()
     
     # Recover or fail based on attempt count
+    # Use transition_task to ensure state machine rules are followed
     for task in stuck_tasks:
         if task.attempt_count >= max_attempts:
             # Exceeded max attempts - mark as FAILED
-            task.state = TaskState.FAILED.value
-            task.last_error_code = "MAX_ATTEMPTS_EXCEEDED"
-            task.last_error_message = f"Task stuck in RUNNING state after {task.attempt_count} attempts"
-            task.last_state_change_at = datetime.utcnow()
-            print(f"[QUEUE] Task {task.id} FAILED after {task.attempt_count} attempts")
+            await transition_task(
+                db,
+                str(task.id),
+                TaskState.FAILED,
+                metadata={
+                    "error_code": "MAX_ATTEMPTS_EXCEEDED",
+                    "error_message": f"Task stuck in RUNNING state after {task.attempt_count} attempts"
+                }
+            )
+            logger.warning(f"Task {task.id} FAILED after {task.attempt_count} attempts")
         else:
             # Still have attempts left - recover to QUEUED
-            task.state = TaskState.QUEUED.value
-            task.last_state_change_at = datetime.utcnow()
-            print(f"[QUEUE] Recovered stuck task {task.id} (attempt {task.attempt_count}/{max_attempts})")
-    
-    if stuck_tasks:
-        await db.commit()
+            await transition_task(db, str(task.id), TaskState.QUEUED)
+            logger.info(f"Recovered stuck task {task.id} (attempt {task.attempt_count}/{max_attempts})")
     
     return len(stuck_tasks)
 
@@ -127,15 +133,17 @@ async def resume_task(
     if not task:
         raise ValueError(f"Task {task_id} not found")
     
-    # Set state to QUEUED with priority boost for resumed tasks
-    task.state = TaskState.QUEUED.value
-    task.priority = PRIORITY_RESUMED  # User manually resumed - higher priority
-    task.queued_at = datetime.utcnow()  # Refresh timestamp
-    task.last_state_change_at = datetime.utcnow()
+    # Use transition_task to ensure state machine rules are followed
+    # Priority boost and timestamp update happens in state machine
+    updated_task = await transition_task(db, task_id, TaskState.QUEUED)
+    
+    # Manual resume gets extra priority boost (state machine handles NEEDS_AUTH/NEEDS_USER boost)
+    updated_task.priority = PRIORITY_RESUMED
+    updated_task.queued_at = datetime.utcnow()
     
     await db.commit()
-    await db.refresh(task)
+    await db.refresh(updated_task)
     
-    print(f"[QUEUE] Resumed task {task_id} with priority boost")
+    logger.info(f"Resumed task {task_id} with priority boost")
     
-    return task
+    return updated_task

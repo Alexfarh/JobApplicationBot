@@ -34,14 +34,14 @@ async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user
     What happens:
     1. POST /api/runs with name and description
     2. Creates ApplicationRun record in database
-    3. Sets status to "created" (initial state)
+    3. Sets status to "queued" (initial state)
     4. Links to user_id
     5. Initializes task counts to 0
     6. Returns 201 Created with run details
     
     Verifies:
     - API returns all fields (name, description, status, user_id)
-    - Initial status is "running" (default)
+    - Initial status is "queued" (default)
     - Task counts start at 0
     
     Cleanup: Automatic via db fixture (try/finally)
@@ -61,9 +61,65 @@ async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user
         data = response.json()
         assert data["name"] == "Test Run"
         assert data["description"] == "Testing run creation"
-        assert data["status"] == "running", "Default status should be 'running'"
+        assert data["status"] == "queued", "Default status should be 'queued'"
         assert data["user_id"] == str(test_user.id)
         assert data["total_tasks"] == 0, "New run should have 0 tasks"
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_create_run_rejects_second_running_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Cannot create a new run while another is RUNNING (V1 constraint)
+    
+    What happens:
+    1. Create first run and set status='running'
+    2. Try to create second run (defaults to 'queued')
+    3. API should reject with 409 Conflict
+    
+    Verifies:
+    - Only ONE run can have status='running' at a time
+    - Error message includes name of existing running run
+    - Second run is NOT created in database
+    
+    Cleanup: Automatic via db fixture (try/finally)
+    """
+    try:
+        # Setup: Create first run and manually set to RUNNING
+        from app.models.application_run import ApplicationRun, RunStatus
+        
+        first_run = ApplicationRun(
+            user_id=test_user.id,
+            name="First Active Run",
+            status=RunStatus.RUNNING.value
+        )
+        db.add(first_run)
+        await db.commit()
+        
+        # Try to create second run (should fail)
+        response = await async_client.post(
+            f"/api/runs?user_id={test_user.id}",
+            json={
+                "name": "Second Run",
+                "description": "Should be rejected"
+            }
+        )
+        
+        # Verify API response: 409 Conflict
+        assert response.status_code == 409, "Should return 409 Conflict"
+        data = response.json()
+        assert "already have an active run" in data["detail"].lower()
+        assert "First Active Run" in data["detail"]
+        
+        # Verify second run was NOT created
+        result = await db.execute(
+            select(ApplicationRun).where(ApplicationRun.user_id == test_user.id)
+        )
+        runs = result.scalars().all()
+        assert len(runs) == 1, "Should only have first run"
+        assert runs[0].name == "First Active Run"
         
     except Exception as e:
         raise e
@@ -158,7 +214,7 @@ async def test_list_runs_empty_multiple_users(async_client: AsyncClient, db: Asy
         db.add(other_user)
         await db.flush()
         
-        run1 = ApplicationRun(user_id=other_user.id, name="Other Run 1", status="created")
+        run1 = ApplicationRun(user_id=other_user.id, name="Other Run 1", status="queued")
         run2 = ApplicationRun(user_id=other_user.id, name="Other Run 2", status="running")
         db.add_all([run1, run2])
         await db.commit()
@@ -196,7 +252,7 @@ async def test_list_runs_with_data(async_client: AsyncClient, db: AsyncSession, 
     """
     try:
         # Setup: Create multiple runs in database
-        run1 = ApplicationRun(user_id=test_user.id, name="Run 1", status="created")
+        run1 = ApplicationRun(user_id=test_user.id, name="Run 1", status="queued")
         run2 = ApplicationRun(user_id=test_user.id, name="Run 2", status="running")
         db.add_all([run1, run2])
         await db.commit()
@@ -240,13 +296,13 @@ async def test_list_runs_isolation(async_client: AsyncClient, db: AsyncSession, 
     """
     try:
         # Setup: Create run for test user
-        run1 = ApplicationRun(user_id=test_user.id, name="My Run", status="created")
+        run1 = ApplicationRun(user_id=test_user.id, name="My Run", status="queued")
         
         # Setup: Create run for DIFFERENT user
         other_user = User(email="other@example.com")
         db.add(other_user)
         await db.flush()
-        run2 = ApplicationRun(user_id=other_user.id, name="Other Run", status="created")
+        run2 = ApplicationRun(user_id=other_user.id, name="Other Run", status="queued")
         
         db.add_all([run1, run2])
         await db.commit()
@@ -359,7 +415,7 @@ async def test_get_run_not_found_with_existing_runs(async_client: AsyncClient, d
     """
     try:
         # Setup: Create existing runs for test_user
-        run1 = ApplicationRun(user_id=test_user.id, name="Existing Run 1", status="created")
+        run1 = ApplicationRun(user_id=test_user.id, name="Existing Run 1", status="queued")
         run2 = ApplicationRun(user_id=test_user.id, name="Existing Run 2", status="running")
         db.add_all([run1, run2])
         await db.commit()
@@ -545,8 +601,8 @@ async def test_delete_run_cascade(async_client: AsyncClient, db: AsyncSession, t
     Cleanup: Automatic via db fixture (try/finally)
     """
     try:
-        # Setup: Create run with task
-        run = ApplicationRun(user_id=test_user.id, name="Test Run", status="created")
+        # Setup: Create run with tasks
+        run = ApplicationRun(user_id=test_user.id, name="Test Run", status="queued")
         db.add(run)
         await db.flush()
         
@@ -635,6 +691,370 @@ async def test_delete_run_wrong_user(async_client: AsyncClient, db: AsyncSession
         
         # Verify 403 response
         assert response.status_code == 403, "Should return 403 when deleting other user's run"
+        
+    except Exception as e:
+        raise e
+
+
+# ============================================================
+# RUN QUEUE TESTS
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_start_queued_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Start a queued run (transition queued -> running)
+    
+    What happens:
+    1. Create run (defaults to status='queued')
+    2. POST /api/runs/{run_id}/start
+    3. Run transitions to status='running'
+    4. started_at timestamp is set
+    
+    Verifies:
+    - Status changes from 'queued' to 'running'
+    - started_at timestamp is populated
+    - Returns 200 with updated run details
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create queued run
+        run = ApplicationRun(user_id=test_user.id, name="Test Run", status="queued")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        
+        # Start the run
+        response = await async_client.post(f"/api/runs/{run.id}/start?user_id={test_user.id}")
+        
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "running"
+        assert data["started_at"] is not None
+        
+        # Verify in database
+        await db.refresh(run)
+        assert run.status == "running"
+        assert run.started_at is not None
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_start_run_rejects_if_another_running(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Cannot start a run if another is already running
+    
+    What happens:
+    1. Create first run and set to 'running'
+    2. Create second run (status='queued')
+    3. Try to start second run
+    4. API rejects with 409 Conflict
+    
+    Verifies:
+    - Only ONE run can be 'running' at a time
+    - Second run stays in 'queued' state
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create running run
+        run1 = ApplicationRun(user_id=test_user.id, name="First Run", status="running")
+        db.add(run1)
+        await db.flush()
+        
+        # Create queued run
+        run2 = ApplicationRun(user_id=test_user.id, name="Second Run", status="queued")
+        db.add(run2)
+        await db.commit()
+        await db.refresh(run2)
+        
+        # Try to start second run
+        response = await async_client.post(f"/api/runs/{run2.id}/start?user_id={test_user.id}")
+        
+        # Verify 409 Conflict
+        assert response.status_code == 409
+        data = response.json()
+        assert "already active" in data["detail"].lower()
+        assert "First Run" in data["detail"]
+        
+        # Verify run2 still queued
+        await db.refresh(run2)
+        assert run2.status == "queued"
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_complete_run_marks_completed(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Completing a run marks it as completed
+    
+    What happens:
+    1. Create and start a run (status='running')
+    2. POST /api/runs/{run_id}/complete
+    3. Run transitions to status='completed'
+    4. completed_at timestamp is set
+    
+    Verifies:
+    - Status changes to 'completed'
+    - completed_at is populated
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create running run
+        run = ApplicationRun(user_id=test_user.id, name="Test Run", status="running")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        
+        # Complete the run
+        response = await async_client.post(
+            f"/api/runs/{run.id}/complete?user_id={test_user.id}&auto_start_next=false"
+        )
+        
+        # Verify response
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["completed_at"] is not None
+        
+        # Verify in database
+        await db.refresh(run)
+        assert run.status == "completed"
+        assert run.completed_at is not None
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_complete_run_auto_starts_next_queued_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Completing a run automatically starts the next queued run (FIFO)
+    
+    What happens:
+    1. Create run1 (status='running')
+    2. Create run2 (status='queued', created first)
+    3. Create run3 (status='queued', created second)
+    4. POST /api/runs/{run1.id}/complete with auto_start_next=true
+    5. run1 → 'completed'
+    6. run2 → 'running' (oldest queued, FIFO)
+    7. run3 stays 'queued'
+    
+    Verifies:
+    - Run queue processes in FIFO order (by created_at)
+    - Only ONE run is 'running' at a time
+    - Auto-start happens automatically on complete
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        from datetime import datetime, timedelta
+        
+        # Setup: Create running run
+        run1 = ApplicationRun(user_id=test_user.id, name="Running Run", status="running")
+        db.add(run1)
+        await db.flush()
+        
+        # Create queued runs with specific order
+        run2 = ApplicationRun(
+            user_id=test_user.id,
+            name="Second Run",
+            status="queued",
+            created_at=datetime.utcnow() - timedelta(minutes=10)  # Older
+        )
+        run3 = ApplicationRun(
+            user_id=test_user.id,
+            name="Third Run",
+            status="queued",
+            created_at=datetime.utcnow() - timedelta(minutes=5)  # Newer
+        )
+        db.add_all([run2, run3])
+        await db.commit()
+        
+        # Complete run1 with auto_start_next=true (default)
+        response = await async_client.post(f"/api/runs/{run1.id}/complete?user_id={test_user.id}")
+        
+        # Verify response shows run1 completed
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        
+        # Verify run1 is completed
+        await db.refresh(run1)
+        assert run1.status == "completed"
+        
+        # Verify run2 was auto-started (oldest queued)
+        await db.refresh(run2)
+        assert run2.status == "running"
+        assert run2.started_at is not None
+        
+        # Verify run3 is still queued (waiting its turn)
+        await db.refresh(run3)
+        assert run3.status == "queued"
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_complete_run_with_auto_start_disabled(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Completing a run with auto_start_next=false doesn't start next run
+    
+    What happens:
+    1. Create run1 (status='running')
+    2. Create run2 (status='queued')
+    3. POST /api/runs/{run1.id}/complete?auto_start_next=false
+    4. run1 → 'completed'
+    5. run2 stays 'queued' (not auto-started)
+    
+    Verifies:
+    - auto_start_next parameter works
+    - User can manually control run queue progression
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create running run
+        run1 = ApplicationRun(user_id=test_user.id, name="First Run", status="running")
+        db.add(run1)
+        await db.flush()
+        
+        # Create queued run
+        run2 = ApplicationRun(user_id=test_user.id, name="Second Run", status="queued")
+        db.add(run2)
+        await db.commit()
+        
+        # Complete run1 WITHOUT auto-starting next
+        response = await async_client.post(
+            f"/api/runs/{run1.id}/complete?user_id={test_user.id}&auto_start_next=false"
+        )
+        
+        # Verify run1 completed
+        assert response.status_code == 200
+        await db.refresh(run1)
+        assert run1.status == "completed"
+        
+        # Verify run2 is STILL queued (not auto-started)
+        await db.refresh(run2)
+        assert run2.status == "queued"
+        assert run2.started_at is None
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_complete_run_when_no_queued_runs_exist(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Completing a run when no queued runs exist
+    
+    What happens:
+    1. Create run1 (status='running')
+    2. No other runs exist
+    3. POST /api/runs/{run1.id}/complete
+    4. run1 → 'completed'
+    5. No errors (gracefully handles empty queue)
+    
+    Verifies:
+    - System handles empty run queue gracefully
+    - Doesn't crash when no next run to start
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create running run (only run)
+        run = ApplicationRun(user_id=test_user.id, name="Only Run", status="running")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        
+        # Complete the run
+        response = await async_client.post(f"/api/runs/{run.id}/complete?user_id={test_user.id}")
+        
+        # Verify success
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        
+        # Verify in database
+        await db.refresh(run)
+        assert run.status == "completed"
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_start_run_rejects_completed_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Cannot start a completed run
+    
+    What happens:
+    1. Create run (status='completed')
+    2. Try to POST /api/runs/{run_id}/start
+    3. API rejects with 400 Bad Request
+    
+    Verifies:
+    - Completed runs cannot be restarted
+    - Proper error message returned
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create completed run
+        run = ApplicationRun(user_id=test_user.id, name="Completed Run", status="completed")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        
+        # Try to start it
+        response = await async_client.post(f"/api/runs/{run.id}/start?user_id={test_user.id}")
+        
+        # Verify 400 Bad Request
+        assert response.status_code == 400
+        data = response.json()
+        assert "cannot start a completed run" in data["detail"].lower()
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_start_run_already_running(async_client: AsyncClient, db: AsyncSession, test_user: User):
+    """
+    Test: Starting a run that's already running returns error
+    
+    What happens:
+    1. Create run (status='running')
+    2. Try to POST /api/runs/{run_id}/start again
+    3. API rejects with 400 Bad Request
+    
+    Verifies:
+    - Idempotency check prevents double-start
+    """
+    try:
+        from app.models.application_run import ApplicationRun
+        
+        # Setup: Create running run
+        run = ApplicationRun(user_id=test_user.id, name="Running Run", status="running")
+        db.add(run)
+        await db.commit()
+        await db.refresh(run)
+        
+        # Try to start it again
+        response = await async_client.post(f"/api/runs/{run.id}/start?user_id={test_user.id}")
+        
+        # Verify 400 Bad Request
+        assert response.status_code == 400
+        data = response.json()
+        assert "already running" in data["detail"].lower()
         
     except Exception as e:
         raise e

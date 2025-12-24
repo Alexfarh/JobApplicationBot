@@ -1,10 +1,18 @@
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Enum as SQLEnum
 from sqlalchemy.orm import relationship
 import uuid
+import enum
 
 from app.database import Base
 from app.database_types import GUID, JSON
+
+
+class RunStatus(str, enum.Enum):
+    """Application run status."""
+    QUEUED = "queued"      # Run created, waiting to be started
+    RUNNING = "running"    # Currently being processed
+    COMPLETED = "completed" # All tasks finished
 
 
 class ApplicationRun(Base):
@@ -17,8 +25,9 @@ class ApplicationRun(Base):
     name = Column(String, nullable=True)
     description = Column(String, nullable=True)
     
-    # Status: running | paused | stopped | completed
-    status = Column(String, nullable=False, default="running")
+    # Status: queued | running | completed
+    # Only ONE run can have status='running' at a time (enforced by API)
+    status = Column(String, nullable=False, default="queued")
     
     # Configuration snapshot
     settings_snapshot = Column(JSON, nullable=True)

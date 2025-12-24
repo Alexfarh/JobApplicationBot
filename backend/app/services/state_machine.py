@@ -2,12 +2,17 @@
 State machine for application tasks.
 ALL state transitions must go through this module.
 """
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.application_task import ApplicationTask, TaskState
+from app.models.job_posting import JobPosting
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 
 # Define allowed state transitions
@@ -26,7 +31,7 @@ ALLOWED_TRANSITIONS: Dict[TaskState, list[TaskState]] = {
     TaskState.NEEDS_USER: [TaskState.QUEUED],  # After user provides input
     TaskState.PENDING_APPROVAL: [TaskState.APPROVED, TaskState.EXPIRED],
     TaskState.APPROVED: [TaskState.RUNNING, TaskState.EXPIRED],  # Worker interrupts to process; can expire if session lost
-    TaskState.FAILED: [TaskState.QUEUED],  # Manual resume
+    TaskState.FAILED: [],  # Terminal state (after auto-retry exhausted)
     TaskState.SUBMITTED: [],  # Terminal state
     TaskState.EXPIRED: [],  # Terminal state
 }
@@ -88,14 +93,52 @@ async def transition_task(
     
     # State-specific updates
     if to_state == TaskState.RUNNING:
-        task.started_at = datetime.utcnow()
+        if task.started_at is None:
+            task.started_at = datetime.utcnow()
         task.attempt_count += 1
+    
+    # Auto-retry logic: First failure goes back to QUEUED, second failure is terminal
+    if to_state == TaskState.FAILED:
+        if task.attempt_count < 2:
+            # First failure - auto-retry once with boosted priority for immediate retry
+            task.state = TaskState.QUEUED.value
+            task.priority = 100  # Boosted priority for immediate retry
+        # else: Second failure - stays in FAILED (terminal)
+    
+    # Priority boost when resuming to QUEUED from user-unblocked states
+    # This pushes the task to front of queue and spawns subprocess
+    if to_state == TaskState.QUEUED and from_state in [
+        TaskState.NEEDS_AUTH,
+        TaskState.NEEDS_USER,
+    ]:
+        task.priority = 100  # Boosted priority (default is 50)
+        # TODO: Spawn subprocess worker for immediate processing (V1: max 1 subprocess)
+        # This allows unblocked task to run concurrently with main worker
+    
+    # Priority boost for approved tasks transitioning to RUNNING
+    # Highest priority (200) because approval has TTL and session may expire
+    if to_state == TaskState.RUNNING and from_state == TaskState.APPROVED:
+        task.priority = 200  # Highest priority - time-sensitive
+    
+    # Mark job as applied only on successful submission
+    if to_state == TaskState.SUBMITTED:
+        await _mark_job_as_applied(db, task.job_id)
     
     await db.commit()
     await db.refresh(task)
     
-    # Log transition
-    print(f"[STATE_MACHINE] Task {task_id}: {from_state.value} → {to_state.value}")
+    # Log transition with metadata
+    log_data = {
+        "task_id": str(task_id),
+        "from_state": from_state.value,
+        "to_state": to_state.value,
+        "attempt_count": task.attempt_count,
+        "priority": task.priority,
+    }
+    if metadata:
+        log_data["metadata"] = metadata
+    
+    logger.info(f"Task state transition: {from_state.value} → {to_state.value}", extra=log_data)
     
     return task
 
@@ -103,3 +146,20 @@ async def transition_task(
 async def can_transition(from_state: TaskState, to_state: TaskState) -> bool:
     """Check if a transition is allowed without modifying the database"""
     return to_state in ALLOWED_TRANSITIONS.get(from_state, [])
+
+
+async def _mark_job_as_applied(db: AsyncSession, job_id: int) -> None:
+    """
+    Mark a job posting as successfully applied to.
+    Only called when a task transitions to SUBMITTED state.
+    This ensures EXPIRED tasks don't prevent future reapplications.
+    """
+    result = await db.execute(
+        select(JobPosting).where(JobPosting.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+    
+    if job:
+        job.has_been_applied_to = True
+        job.last_applied_at = datetime.utcnow()
+        # Note: commit handled by caller (transition_task)

@@ -7,6 +7,7 @@ This is the main app that:
 - Provides health check endpoint
 - Sets up database connection lifecycle
 """
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,13 @@ from app.config import settings
 from app.database import engine, Base
 # Import API routers
 from app.api import auth, runs
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -26,14 +34,14 @@ async def lifespan(app: FastAPI):
     On shutdown: Close database connections gracefully
     """
     # Startup
-    print("🚀 Starting JobApplicationBot API...")
-    print(f"📊 Database: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'configured'}")
-    print(f"🔧 Debug mode: {settings.debug}")
+    logger.info("🚀 Starting JobApplicationBot API...")
+    logger.info(f"📊 Database: {settings.database_url.split('@')[1] if '@' in settings.database_url else 'configured'}")
+    logger.info(f"🔧 Debug mode: {settings.debug}")
     
     yield
     
     # Shutdown
-    print("👋 Shutting down JobApplicationBot API...")
+    logger.info("👋 Shutting down JobApplicationBot API...")
     await engine.dispose()
 
 

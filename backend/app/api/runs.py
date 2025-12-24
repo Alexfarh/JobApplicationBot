@@ -3,6 +3,7 @@ Application Run endpoints.
 
 A run represents a batch of job applications to process.
 """
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -11,12 +12,16 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List, Optional
+import logging
 
 from app.database import get_db
-from app.models.application_run import ApplicationRun
+from app.models.application_run import ApplicationRun, RunStatus
 from app.models.application_task import ApplicationTask
+from app.services.run_queue import start_next_run, complete_run, get_active_run
 
+logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -53,7 +58,7 @@ async def get_run_by_id(run_id: str, user_id: str, db: AsyncSession) -> Applicat
     # Then check if user owns it
     if str(run.user_id) != user_id:
         # Log for debugging (server-side only, not sent to client)
-        print(f"⚠️  Access denied: User {user_id} tried to access run {run_id} owned by {run.user_id}")
+        logger.warning(f"Access denied: User {user_id} tried to access run {run_id} owned by {run.user_id}")
         raise HTTPException(
             status_code=403,
             detail="Access denied. You don't have permission to access this run."
@@ -145,13 +150,36 @@ async def create_run(
     
     A run is a batch of job applications to process.
     After creating, add jobs via POST /runs/{run_id}/jobs
+    
+    V1 Constraint: Only ONE run can have status='running' at a time.
+    New runs default to 'queued' status.
     """
     try:
+        # V1: Check if user already has a running run
+        result = await db.execute(
+            select(ApplicationRun)
+            .where(
+                ApplicationRun.user_id == UUID(user_id),
+                ApplicationRun.status == RunStatus.RUNNING.value
+            )
+        )
+        existing_running_run = result.scalar_one_or_none()
+        
+        if existing_running_run:
+            logger.warning(
+                f"User {user_id} attempted to create run while run {existing_running_run.id} is still running"
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=f"You already have an active run: '{existing_running_run.name or str(existing_running_run.id)}'. "
+                       f"Complete or stop it before starting a new one."
+            )
+        
         run = ApplicationRun(
             user_id=UUID(user_id),
             name=request.name,
             description=request.description
-            # status defaults to "running" from model
+            # status defaults to "queued" from model
         )
         
         db.add(run)
@@ -170,9 +198,12 @@ async def create_run(
             updated_at=run.updated_at,
         )
     
+    except HTTPException:
+        raise
+    
     except Exception as e:
         await db.rollback()
-        print(f"❌ Error creating run: {str(e)}")
+        logger.error(f"Error creating run: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to create run. Please try again."
@@ -207,7 +238,7 @@ async def list_runs(
         )
     
     except Exception as e:
-        print(f"❌ Error listing runs: {str(e)}")
+        logger.error(f"Error listing runs: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to fetch runs. Please try again."
@@ -234,7 +265,7 @@ async def get_run(
         raise
     
     except Exception as e:
-        print(f"❌ Error fetching run: {str(e)}")
+        logger.error(f"Error fetching run: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to fetch run details. Please try again."
@@ -266,8 +297,107 @@ async def delete_run(
     
     except Exception as e:
         await db.rollback()
-        print(f"❌ Error deleting run: {str(e)}")
+        logger.error(f"Error deleting run: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Failed to delete run. Please try again."
+        )
+
+
+@router.post("/{run_id}/start", response_model=RunResponse)
+async def start_run(
+    run_id: str,
+    user_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Start a queued run (transition from 'queued' to 'running').
+    
+    V1 Constraint: Only ONE run can be running at a time.
+    If another run is already running, this will fail with 409 Conflict.
+    """
+    try:
+        # Get run and verify ownership
+        run = await get_run_by_id(run_id, user_id, db)
+        
+        # Check if already running
+        if run.status == RunStatus.RUNNING.value:
+            raise HTTPException(
+                status_code=400,
+                detail="Run is already running."
+            )
+        
+        # Check if already completed
+        if run.status == RunStatus.COMPLETED.value:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot start a completed run."
+            )
+        
+        # Check if another run is already running
+        active_run = await get_active_run(db, user_id)
+        if active_run and str(active_run.id) != run_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Another run is already active: '{active_run.name or str(active_run.id)}'. "
+                       f"Complete it before starting this one."
+            )
+        
+        # Start the run
+        run.status = RunStatus.RUNNING.value
+        run.started_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(run)
+        
+        logger.info(f"Started run {run_id} ('{run.name}')")
+        
+        return await get_run_with_task_counts(run, db)
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error starting run: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to start run. Please try again."
+        )
+
+
+@router.post("/{run_id}/complete", response_model=RunResponse)
+async def mark_run_complete(
+    run_id: str,
+    user_id: str,
+    auto_start_next: bool = True,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark a run as completed and optionally start the next queued run.
+    
+    Args:
+        run_id: Run UUID
+        user_id: User UUID (from auth)
+        auto_start_next: If True, automatically start next queued run (default: True)
+    """
+    try:
+        # Get run and verify ownership
+        run = await get_run_by_id(run_id, user_id, db)
+        
+        # Mark as completed (and optionally start next run)
+        next_run = await complete_run(db, run_id, auto_start_next=auto_start_next)
+        
+        # Return the completed run
+        await db.refresh(run)
+        return await get_run_with_task_counts(run, db)
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Error completing run: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to complete run. Please try again."
         )
