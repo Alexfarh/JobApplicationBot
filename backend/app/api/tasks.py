@@ -3,62 +3,26 @@ Tasks API endpoints.
 Handles task querying and resume operations.
 """
 import logging
-from typing import Optional, List
-from datetime import datetime
+from typing import Optional
 from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from pydantic import BaseModel, ConfigDict
+import logging
 
 from app.database import get_db
 from app.models.application_task import ApplicationTask
 from app.models.user import User
 from app.api.auth import get_current_user
 from app.services.state_machine import transition_task
+from app.schemas.task import TaskResponse, ResumeResponse
 
-# Configure logger
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 
-# ============================================================
-# REQUEST/RESPONSE SCHEMAS
-# ============================================================
-
-class TaskResponse(BaseModel):
-    """Schema for task response."""
-    id: UUID
-    run_id: UUID
-    job_id: int
-    state: str
-    priority: int
-    attempt_count: int
-    last_error_code: Optional[str] = None
-    last_error_message: Optional[str] = None
-    queued_at: datetime
-    started_at: Optional[datetime] = None
-    last_state_change_at: datetime
-    
-    model_config = ConfigDict(from_attributes=True)
-
-
-class ResumeResponse(BaseModel):
-    """Response after resuming a task."""
-    task_id: str
-    old_state: str
-    new_state: str
-    priority: int
-    message: str
-
-
-# ============================================================
-# ENDPOINTS
-# ============================================================
-
-@router.get("/", response_model=List[TaskResponse])
+# Endpoints
+@router.get("/", response_model=list[TaskResponse])
 async def list_tasks(
     run_id: Optional[str] = Query(None, description="Filter by run ID"),
     state: Optional[str] = Query(None, description="Filter by state (QUEUED, RUNNING, etc.)"),

@@ -8,22 +8,83 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List, Optional
+from uuid import UUID
+from datetime import datetime
 import logging
 
 from app.database import get_db
 from app.models.application_run import ApplicationRun, RunStatus
 from app.models.application_task import ApplicationTask
+from app.models.user import User
 from app.services.run_queue import start_next_run, complete_run, get_active_run
-
-logger = logging.getLogger(__name__)
+from app.api.auth import get_current_user
+from app.schemas.run import CreateRunRequest, RunResponse, RunListResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+# Dependencies
+async def require_complete_profile(current_user: User = Depends(get_current_user)) -> User:
+    """
+    Dependency that ensures user has a complete profile before creating runs.
+    
+    A complete profile requires:
+    - Full name
+    - Phone number
+    - City, state, country
+    - Uploaded resume
+    
+    Args:
+        current_user: Authenticated user from get_current_user dependency
+        
+    Returns:
+        User object if profile is complete
+        
+    Raises:
+        HTTPException 403: Profile is incomplete
+    """
+    if not current_user.has_complete_profile():
+        missing_fields = []
+        
+        if not current_user.full_name:
+            missing_fields.append("full name")
+        if not current_user.email:
+            missing_fields.append("email")
+        if not current_user.phone:
+            missing_fields.append("phone number")
+        if not current_user.resume_path:
+            missing_fields.append("resume")
+        
+        # Check mandatory questions
+        if not current_user.mandatory_questions:
+            missing_fields.append("mandatory questions")
+        else:
+            critical_questions = ['work_authorization', 'veteran_status', 'disability_status']
+            missing_questions = []
+            for question in critical_questions:
+                if question not in current_user.mandatory_questions or not current_user.mandatory_questions[question]:
+                    missing_questions.append(question)
+            if missing_questions:
+                missing_fields.append(f"mandatory questions ({', '.join(missing_questions)})")
+        
+        logger.warning(
+            f"User {current_user.email} attempted to create run with incomplete profile. "
+            f"Missing: {', '.join(missing_fields)}"
+        )
+        
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": "Complete your profile before creating a run",
+                "missing_fields": missing_fields,
+                "profile_url": "/profile"  # Frontend can redirect here
+            }
+        )
+    
+    return current_user
 
 # Helper functions
 async def get_run_by_id(run_id: str, user_id: str, db: AsyncSession) -> ApplicationRun:
@@ -66,7 +127,6 @@ async def get_run_by_id(run_id: str, user_id: str, db: AsyncSession) -> Applicat
     
     return run
 
-
 async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> "RunResponse":
     """
     Convert an ApplicationRun to RunResponse with task counts.
@@ -103,48 +163,11 @@ async def get_run_with_task_counts(run: ApplicationRun, db: AsyncSession) -> "Ru
         rejected_tasks=sum(1 for t in tasks if t.state == "REJECTED"),
     )
 
-
-# Pydantic schemas
-class CreateRunRequest(BaseModel):
-    """Request to create a new application run."""
-    name: str
-    description: Optional[str] = None
-
-
-class RunResponse(BaseModel):
-    """Response with run details."""
-    id: str
-    user_id: str
-    name: Optional[str]
-    description: Optional[str]
-    status: str
-    created_at: datetime
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
-    updated_at: datetime
-    
-    # Task counts
-    total_tasks: int = 0
-    queued_tasks: int = 0
-    running_tasks: int = 0
-    submitted_tasks: int = 0
-    failed_tasks: int = 0
-    rejected_tasks: int = 0
-    
-    model_config = ConfigDict(from_attributes=True)  # Allows creating from SQLAlchemy models
-
-
-class RunListResponse(BaseModel):
-    """List of runs."""
-    runs: List[RunResponse]
-    total: int
-
-
 # Endpoints
 @router.post("/", response_model=RunResponse, status_code=201)
 async def create_run(
     request: CreateRunRequest,
-    user_id: str,  # TODO: Get from auth token in Phase 2
+    current_user: User = Depends(require_complete_profile),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -155,8 +178,12 @@ async def create_run(
     
     V1 Constraint: Only ONE run can have status='running' at a time.
     New runs default to 'queued' status.
+    
+    Requires: Complete user profile (name, phone, address, resume)
     """
     try:
+        user_id = str(current_user.id)
+        
         # V1: Check if user already has a running run
         result = await db.execute(
             select(ApplicationRun)
@@ -211,16 +238,16 @@ async def create_run(
             detail="Failed to create run. Please try again."
         )
 
-
 @router.get("/", response_model=RunListResponse)
 async def list_runs(
-    user_id: str,  # TODO: Get from auth token in Phase 2
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     List all runs for a user, sorted by most recent first.
     """
     try:
+        user_id = str(current_user.id)
         result = await db.execute(
             select(ApplicationRun)
             .where(ApplicationRun.user_id == UUID(user_id))
@@ -246,17 +273,17 @@ async def list_runs(
             detail="Failed to fetch runs. Please try again."
         )
 
-
 @router.get("/{run_id}", response_model=RunResponse)
 async def get_run(
     run_id: str,
-    user_id: str,  # TODO: Get from auth token in Phase 2
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Get details of a specific run.
     """
     try:
+        user_id = str(current_user.id)
         # Get run and verify ownership
         run = await get_run_by_id(run_id, user_id, db)
         
@@ -273,11 +300,10 @@ async def get_run(
             detail="Failed to fetch run details. Please try again."
         )
 
-
 @router.delete("/{run_id}", status_code=204)
 async def delete_run(
     run_id: str,
-    user_id: str,  # TODO: Get from auth token in Phase 2
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -286,6 +312,7 @@ async def delete_run(
     Note: Tasks will be deleted via CASCADE constraint.
     """
     try:
+        user_id = str(current_user.id)
         # Get run and verify ownership
         run = await get_run_by_id(run_id, user_id, db)
         
@@ -309,7 +336,7 @@ async def delete_run(
 @router.post("/{run_id}/start", response_model=RunResponse)
 async def start_run(
     run_id: str,
-    user_id: str,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -319,6 +346,7 @@ async def start_run(
     If another run is already running, this will fail with 409 Conflict.
     """
     try:
+        user_id = str(current_user.id)
         # Get run and verify ownership
         run = await get_run_by_id(run_id, user_id, db)
         
@@ -370,8 +398,8 @@ async def start_run(
 @router.post("/{run_id}/complete", response_model=RunResponse)
 async def mark_run_complete(
     run_id: str,
-    user_id: str,
     auto_start_next: bool = True,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -379,10 +407,10 @@ async def mark_run_complete(
     
     Args:
         run_id: Run UUID
-        user_id: User UUID (from auth)
         auto_start_next: If True, automatically start next queued run (default: True)
     """
     try:
+        user_id = str(current_user.id)
         # Get run and verify ownership
         run = await get_run_by_id(run_id, user_id, db)
         

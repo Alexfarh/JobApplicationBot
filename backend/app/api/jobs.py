@@ -3,61 +3,23 @@ Jobs API endpoints.
 Handles job posting CRUD operations.
 """
 import logging
-from typing import Optional, List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from pydantic import BaseModel, HttpUrl, ConfigDict
+import logging
 
 from app.database import get_db
 from app.models.job_posting import JobPosting
 from app.models.user import User
 from app.api.auth import get_current_user
+from app.schemas.job import JobCreate, JobResponse
 
-# Configure logger
 logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 
-
-# ============================================================
-# REQUEST/RESPONSE SCHEMAS
-# ============================================================
-
-class JobBase(BaseModel):
-    """Base schema with common job posting fields."""
-    job_url: str
-    apply_url: str
-    source: Optional[str] = None  # e.g., "greenhouse", "workday"
-    job_title: Optional[str] = None
-    company_name: Optional[str] = None
-    location_text: Optional[str] = None
-    work_mode: Optional[str] = None  # remote | hybrid | onsite
-    employment_type: Optional[str] = None  # full-time | contract
-    industry: Optional[str] = None
-    description_raw: Optional[str] = None
-    description_clean: Optional[str] = None
-    skills: Optional[List[str]] = None
-
-
-class JobCreate(JobBase):
-    """Schema for creating a new job posting."""
-    pass
-
-
-class JobResponse(JobBase):
-    """Schema for job posting response."""
-    id: int
-    has_been_applied_to: bool
-    
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ============================================================
-# ENDPOINTS
-# ============================================================
-
+# Endpoints
 @router.post("/", response_model=JobResponse, status_code=201)
 async def create_job(
     job: JobCreate,
@@ -122,7 +84,7 @@ async def create_job(
     return new_job
 
 
-@router.get("/", response_model=List[JobResponse])
+@router.get("/", response_model=list[JobResponse])
 async def list_jobs(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),

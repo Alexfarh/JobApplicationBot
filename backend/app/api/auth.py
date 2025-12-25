@@ -3,105 +3,38 @@ Authentication endpoints for magic link login.
 
 Phase 1: Dev mode - prints magic link to console
 Future: Send email with magic link
+
+Security features:
+- Account lockout after 5 failed attempts (30 min cooldown)
+- Magic link tokens expire after configured TTL
+- One-time use tokens (invalidated after verification)
+- IP address logging for audit trail
+- Role-based access control (admin vs user)
 """
 import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Header
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.config import settings
+from app.schemas.auth import (
+    MagicLinkRequest,
+    MagicLinkResponse,
+    VerifyTokenRequest,
+    AuthResponse
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-
-# Request/Response Models (Pydantic schemas)
-class MagicLinkRequest(BaseModel):
-    """Request body for requesting a magic link."""
-    email: EmailStr  # Automatically validates email format
-
-
-class MagicLinkResponse(BaseModel):
-    """Response after requesting magic link."""
-    message: str
-    email: str
-
-
-class VerifyTokenRequest(BaseModel):
-    """Request body for verifying a magic link token."""
-    token: str
-
-
-class AuthResponse(BaseModel):
-    """Response after successful authentication."""
-    user_id: str
-    email: str
-    token: str  # In real app, this would be a JWT
-
-
-# Authentication Dependency
-async def get_current_user(
-    authorization: str = Header(...),
-    db: AsyncSession = Depends(get_db)
-) -> User:
-    """
-    Dependency to get current authenticated user from token.
-    
-    Phase 1: Token is just the user_id (simple bearer token)
-    Future: Validate JWT and extract user_id
-    
-    Args:
-        authorization: Authorization header (format: "Bearer <token>")
-        db: Database session
-    
-    Returns:
-        User: The authenticated user
-    
-    Raises:
-        HTTPException 401: If token is invalid or user not found
-    """
-    # Extract token from "Bearer <token>" format
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authorization header format. Use: Bearer <token>"
-        )
-    
-    token = authorization[7:]  # Remove "Bearer " prefix
-    
-    # Phase 1: token is just the user_id
-    # Future: decode JWT and extract user_id
-    try:
-        user_id = token
-        
-        # Fetch user from database
-        result = await db.execute(
-            select(User).where(User.id == user_id)
-        )
-        user = result.scalar_one_or_none()
-        
-        if not user:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid token. User not found."
-            )
-        
-        return user
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error validating token: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token."
-        )
+# Security constants
+MAX_FAILED_ATTEMPTS = 5
+ACCOUNT_LOCK_MINUTES = 30
 
 
 # Endpoints
@@ -128,8 +61,8 @@ async def request_magic_link(
         user = result.scalar_one_or_none()
         
         if not user:
-            # Create new user
-            user = User(email=request.email)
+            # Create new user with default USER role
+            user = User(email=request.email, role=UserRole.USER)
             db.add(user)
         
         # Generate magic link token
@@ -170,9 +103,136 @@ async def request_magic_link(
         )
 
 
+# Authentication Dependencies
+async def get_current_user(
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db)
+) -> User:
+    """
+    Dependency to get current authenticated user from token.
+    
+    Phase 1: Token is just the user_id (simple bearer token)
+    Future: Validate JWT and extract user_id
+    
+    Args:
+        authorization: Authorization header (format: "Bearer <token>")
+        db: Database session
+    
+    Returns:
+        User: The authenticated user
+    
+    Raises:
+        HTTPException 401: If token is invalid or user not found
+        HTTPException 403: If account is locked
+    """
+    # Extract token from "Bearer <token>" format
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization header format. Use: Bearer <token>"
+        )
+    
+    token = authorization[7:]  # Remove "Bearer " prefix
+    
+    # Phase 1: token is just the user_id
+    # Future: decode JWT and extract user_id
+    try:
+        user_id = token
+        
+        # Fetch user from database
+        result = await db.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token. User not found."
+            )
+        
+        # Check if account is locked
+        if user.is_account_locked():
+            raise HTTPException(
+                status_code=403,
+                detail=f"Account temporarily locked due to multiple failed login attempts. Try again after {user.account_locked_until.isoformat()}"
+            )
+        
+        return user
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating token: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token."
+        )
+
+
+async def require_admin(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """
+    Dependency to require admin role.
+    
+    Use this for admin-only endpoints to enforce role-based access control.
+    
+    Args:
+        current_user: The authenticated user (from get_current_user)
+    
+    Returns:
+        User: The authenticated admin user
+    
+    Raises:
+        HTTPException 403: If user is not an admin
+    
+    Example:
+        @router.get("/admin/users")
+        async def list_all_users(admin: User = Depends(require_admin)):
+            # Only admins can access this
+    """
+    if not current_user.is_admin():
+        logger.warning(
+            f"User {current_user.email} (role={current_user.role.value}) "
+            f"attempted to access admin endpoint"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required. You do not have permission to access this resource."
+        )
+    
+    return current_user
+
+
+def get_client_ip(request: Request) -> str:
+    """
+    Extract client IP address from request.
+    
+    Checks X-Forwarded-For header (for proxies/load balancers) first,
+    falls back to direct client IP.
+    
+    Args:
+        request: FastAPI Request object
+    
+    Returns:
+        str: Client IP address
+    """
+    # Check X-Forwarded-For header (set by proxies/load balancers)
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # X-Forwarded-For can be comma-separated list, take first IP
+        return forwarded.split(",")[0].strip()
+    
+    # Fall back to direct client IP
+    return request.client.host if request.client else "unknown"
+
+
+# Endpoints
 @router.post("/verify-token", response_model=AuthResponse)
 async def verify_token(
-    request: VerifyTokenRequest,
+    verify_request: VerifyTokenRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -180,27 +240,56 @@ async def verify_token(
     
     Returns user info and session token.
     
+    Security features:
+    - One-time use tokens (cleared after verification)
+    - Token expiration validation
+    - Account lockout after failed attempts
+    - IP address logging
+    
     Returns:
         200: Token valid, user authenticated
         401: Invalid or expired token
+        403: Account locked due to failed attempts
         500: Database or system error
     """
     try:
         # Find user with this token
         result = await db.execute(
-            select(User).where(User.magic_link_token == request.token)
+            select(User).where(User.magic_link_token == verify_request.token)
         )
         user = result.scalar_one_or_none()
         
         # Validate token exists
         if not user:
+            # Log potential brute force attempt
+            logger.warning(f"Invalid token attempt from IP: {get_client_ip(request)}")
             raise HTTPException(
                 status_code=401,
                 detail="Invalid token. Please request a new magic link."
             )
         
+        # Check if account is locked (due to previous failed attempts)
+        if user.is_account_locked():
+            logger.warning(
+                f"Login attempt on locked account: {user.email} from IP: {get_client_ip(request)}"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=f"Account temporarily locked. Try again after {user.account_locked_until.isoformat()}"
+            )
+        
         # Validate token not expired
         if user.magic_link_expires_at < datetime.utcnow():
+            # Increment failed attempts
+            user.failed_login_attempts += 1
+            
+            # Lock account after too many failed attempts
+            if user.failed_login_attempts >= MAX_FAILED_ATTEMPTS:
+                user.account_locked_until = datetime.utcnow() + timedelta(minutes=ACCOUNT_LOCK_MINUTES)
+                logger.warning(
+                    f"Account locked due to {MAX_FAILED_ATTEMPTS} failed attempts: {user.email}"
+                )
+            
             # Clear expired token
             user.magic_link_token = None
             user.magic_link_expires_at = None
@@ -211,21 +300,31 @@ async def verify_token(
                 detail="Token expired. Please request a new magic link."
             )
         
-        # Token is valid - clear it (one-time use)
-        user.magic_link_token = None
+        # Token is valid - authenticate user
+        user.magic_link_token = None  # One-time use
         user.magic_link_expires_at = None
+        user.last_login_at = datetime.utcnow()
+        user.last_login_ip = get_client_ip(request)
+        user.failed_login_attempts = 0  # Reset failed attempts on successful login
+        user.account_locked_until = None  # Clear any lock
+        
         await db.commit()
+        
+        logger.info(f"Successful login: {user.email} from IP: {user.last_login_ip}")
         
         # In a real app, generate JWT here
         # For now, return user ID as "token"
         return AuthResponse(
+            access_token=str(user.id),  # Phase 1: simple user_id as token
             user_id=str(user.id),
             email=user.email,
-            token=str(user.id)  # Phase 1: simple user_id as token
+            full_name=user.full_name,
+            role=user.role.value,
+            profile_complete=user.has_complete_profile()
         )
     
     except HTTPException as http_err:
-        # Re-raise HTTP exceptions (401 errors with messages already set above)
+        # Re-raise HTTP exceptions (401/403 errors with messages already set above)
         # These are expected user errors, not system failures
         raise http_err
     

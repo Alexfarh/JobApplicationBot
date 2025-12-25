@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.main import app
-from app.models.user import User
+from app.models.user import User, UserRole
 
 
 @pytest.mark.asyncio
@@ -156,9 +156,9 @@ async def test_verify_token_valid(async_client: AsyncClient, db: AsyncSession):
         data = response.json()
         assert data["email"] == "test@example.com"
         assert data["user_id"] == str(user.id)
-        assert data["token"] is not None, "Should return session token"
-        # Phase 1: token is user_id (will be JWT in Phase 2)
-        assert data["token"] == str(user.id), "Session token should match user_id"
+        assert data["access_token"] is not None, "Should return session token"
+        # Phase 1: access_token is user_id (will be JWT in Phase 2)
+        assert data["access_token"] == str(user.id), "Session token should match user_id"
         
         # Verify database state: magic link token cleared (one-time use)
         await db.refresh(user)
@@ -167,6 +167,8 @@ async def test_verify_token_valid(async_client: AsyncClient, db: AsyncSession):
         
     except Exception as e:
         raise e
+    finally:
+        pass
 
 
 @pytest.mark.asyncio

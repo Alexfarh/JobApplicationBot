@@ -179,10 +179,11 @@ async def test_create_job_empty_skills_array(client: AsyncClient, test_user: Use
 async def test_create_job_unauthenticated_rejected(client: AsyncClient):
     """Test that unauthenticated requests are rejected."""
     # Create a new client without auth headers
-    from httpx import AsyncClient as RawClient
+    from httpx import AsyncClient as RawClient, ASGITransport
     from app.main import app
     
-    async with RawClient(app=app, base_url="http://test") as unauth_client:
+    transport = ASGITransport(app=app)
+    async with RawClient(transport=transport, base_url="http://test") as unauth_client:
         job_data = {
             "job_url": "https://example.com/job/unauth",
             "apply_url": "https://example.com/apply/unauth"
@@ -190,7 +191,6 @@ async def test_create_job_unauthenticated_rejected(client: AsyncClient):
         
         response = await unauth_client.post("/api/jobs/", json=job_data)
         # FastAPI returns 422 when required header (Authorization) is missing
-        assert response.status_code == 422
         assert response.status_code == 422
 
 

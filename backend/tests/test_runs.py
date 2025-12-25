@@ -27,7 +27,7 @@ from app.models.user import User
 
 
 @pytest.mark.asyncio
-async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_create_run(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Create a new ApplicationRun
     
@@ -47,9 +47,9 @@ async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user
     Cleanup: Automatic via db fixture (try/finally)
     """
     try:
-        # Make API request to create run
-        response = await async_client.post(
-            f"/api/runs?user_id={test_user.id}",
+        # Make API request to create run (uses authenticated client)
+        response = await client.post(
+            "/api/runs/",
             json={
                 "name": "Test Run",
                 "description": "Testing run creation"
@@ -70,7 +70,7 @@ async def test_create_run(async_client: AsyncClient, db: AsyncSession, test_user
 
 
 @pytest.mark.asyncio
-async def test_create_run_rejects_second_running_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_create_run_rejects_second_running_run(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Cannot create a new run while another is RUNNING (V1 constraint)
     
@@ -99,8 +99,8 @@ async def test_create_run_rejects_second_running_run(async_client: AsyncClient, 
         await db.commit()
         
         # Try to create second run (should fail)
-        response = await async_client.post(
-            f"/api/runs?user_id={test_user.id}",
+        response = await client.post(
+            f"/api/runs",
             json={
                 "name": "Second Run",
                 "description": "Should be rejected"
@@ -126,7 +126,7 @@ async def test_create_run_rejects_second_running_run(async_client: AsyncClient, 
 
 
 @pytest.mark.asyncio
-async def test_list_runs_empty_no_users(async_client: AsyncClient, db: AsyncSession):
+async def test_list_runs_empty_no_users(client: AsyncClient, db: AsyncSession):
     """
     Test: List runs when NO USERS exist in database
     
@@ -146,7 +146,7 @@ async def test_list_runs_empty_no_users(async_client: AsyncClient, db: AsyncSess
     try:
         # Make API request with random user_id (no users exist)
         fake_user_id = uuid4()
-        response = await async_client.get(f"/api/runs?user_id={fake_user_id}")
+        response = await client.get(f"/api/runs?user_id={fake_user_id}")
         
         # Verify API response
         assert response.status_code == 200
@@ -159,7 +159,7 @@ async def test_list_runs_empty_no_users(async_client: AsyncClient, db: AsyncSess
 
 
 @pytest.mark.asyncio
-async def test_list_runs_empty_single_user(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_list_runs_empty_single_user(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: List runs when user exists but has NO runs yet
     
@@ -177,7 +177,7 @@ async def test_list_runs_empty_single_user(async_client: AsyncClient, db: AsyncS
     """
     try:
         # Make API request to list runs for existing user with no runs
-        response = await async_client.get(f"/api/runs?user_id={test_user.id}")
+        response = await client.get(f"/api/runs")
         
         # Verify API response
         assert response.status_code == 200
@@ -190,7 +190,7 @@ async def test_list_runs_empty_single_user(async_client: AsyncClient, db: AsyncS
 
 
 @pytest.mark.asyncio
-async def test_list_runs_empty_multiple_users(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_list_runs_empty_multiple_users(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: List runs when multiple users exist, querying user with no runs
     
@@ -220,7 +220,7 @@ async def test_list_runs_empty_multiple_users(async_client: AsyncClient, db: Asy
         await db.commit()
         
         # Make API request as test_user (who has no runs)
-        response = await async_client.get(f"/api/runs?user_id={test_user.id}")
+        response = await client.get(f"/api/runs")
         
         # Verify API response: empty for test_user
         assert response.status_code == 200
@@ -233,7 +233,7 @@ async def test_list_runs_empty_multiple_users(async_client: AsyncClient, db: Asy
 
 
 @pytest.mark.asyncio
-async def test_list_runs_with_data(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_list_runs_with_data(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: List runs when user HAS runs
     
@@ -258,7 +258,7 @@ async def test_list_runs_with_data(async_client: AsyncClient, db: AsyncSession, 
         await db.commit()
         
         # Make API request to list runs
-        response = await async_client.get(f"/api/runs?user_id={test_user.id}")
+        response = await client.get(f"/api/runs")
         
         # Verify API response
         assert response.status_code == 200
@@ -273,14 +273,14 @@ async def test_list_runs_with_data(async_client: AsyncClient, db: AsyncSession, 
 
 
 @pytest.mark.asyncio
-async def test_list_runs_isolation(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_list_runs_isolation(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: User ISOLATION - users only see their own runs
     
     What happens:
     1. Create run for test_user
     2. Create run for OTHER user (different user_id)
-    3. GET /api/runs?user_id={test_user.id}
+    3. GET /api/runs
     4. Query filters by user_id (WHERE user_id = ?)
     5. Returns ONLY test_user's run, not other user's run
     
@@ -308,7 +308,7 @@ async def test_list_runs_isolation(async_client: AsyncClient, db: AsyncSession, 
         await db.commit()
         
         # Make API request as test_user
-        response = await async_client.get(f"/api/runs?user_id={test_user.id}")
+        response = await client.get(f"/api/runs")
         
         # Verify API response: only test_user's run
         assert response.status_code == 200
@@ -321,7 +321,7 @@ async def test_list_runs_isolation(async_client: AsyncClient, db: AsyncSession, 
 
 
 @pytest.mark.asyncio
-async def test_get_run_success(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_get_run_success(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Get a SPECIFIC run (happy path)
     
@@ -346,7 +346,7 @@ async def test_get_run_success(async_client: AsyncClient, db: AsyncSession, test
         await db.commit()
         
         # Make API request to get specific run
-        response = await async_client.get(f"/api/runs/{run.id}?user_id={test_user.id}")
+        response = await client.get(f"/api/runs/{run.id}")
         
         # Verify API response
         assert response.status_code == 200
@@ -359,7 +359,7 @@ async def test_get_run_success(async_client: AsyncClient, db: AsyncSession, test
 
 
 @pytest.mark.asyncio
-async def test_get_run_not_found_empty_db(async_client: AsyncClient, test_user: User):
+async def test_get_run_not_found_empty_db(client: AsyncClient, test_user: User):
     """
     Test: Get run that DOESN'T EXIST (empty database, 404 error)
     
@@ -382,7 +382,7 @@ async def test_get_run_not_found_empty_db(async_client: AsyncClient, test_user: 
     try:
         # Make API request with non-existent run ID (DB has no runs)
         fake_id = uuid4()
-        response = await async_client.get(f"/api/runs/{fake_id}?user_id={test_user.id}")
+        response = await client.get(f"/api/runs/{fake_id}")
         
         # Verify 404 response
         assert response.status_code == 404, "Should return 404 for non-existent run"
@@ -393,7 +393,7 @@ async def test_get_run_not_found_empty_db(async_client: AsyncClient, test_user: 
 
 
 @pytest.mark.asyncio
-async def test_get_run_not_found_with_existing_runs(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_get_run_not_found_with_existing_runs(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Get run that DOESN'T EXIST (other runs exist, 404 error)
     
@@ -422,7 +422,7 @@ async def test_get_run_not_found_with_existing_runs(async_client: AsyncClient, d
         
         # Make API request with non-existent run ID (other runs exist)
         fake_id = uuid4()
-        response = await async_client.get(f"/api/runs/{fake_id}?user_id={test_user.id}")
+        response = await client.get(f"/api/runs/{fake_id}")
         
         # Verify 404 response
         assert response.status_code == 404, "Should return 404 for non-existent run"
@@ -433,7 +433,7 @@ async def test_get_run_not_found_with_existing_runs(async_client: AsyncClient, d
 
 
 @pytest.mark.asyncio
-async def test_get_run_wrong_user(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_get_run_wrong_user(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Get run that exists but belongs to ANOTHER USER (403 error)
     
@@ -467,7 +467,7 @@ async def test_get_run_wrong_user(async_client: AsyncClient, db: AsyncSession, t
         await db.commit()
         
         # Make API request as test_user (wrong user)
-        response = await async_client.get(f"/api/runs/{run.id}?user_id={test_user.id}")
+        response = await client.get(f"/api/runs/{run.id}")
         
         # Verify 403 response
         assert response.status_code == 403, "Should return 403 when accessing other user's run"
@@ -478,7 +478,7 @@ async def test_get_run_wrong_user(async_client: AsyncClient, db: AsyncSession, t
 
 
 @pytest.mark.asyncio
-async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_get_run_with_task_counts(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Get run WITH task counts (aggregated from tasks table)
     
@@ -526,7 +526,7 @@ async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSess
         await db.commit()
         
         # Make API request to get run with counts
-        response = await async_client.get(f"/api/runs/{run.id}?user_id={test_user.id}")
+        response = await client.get(f"/api/runs/{run.id}")
         
         # Verify API response includes accurate counts
         assert response.status_code == 200
@@ -543,7 +543,7 @@ async def test_get_run_with_task_counts(async_client: AsyncClient, db: AsyncSess
 
 
 @pytest.mark.asyncio
-async def test_delete_run_success(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_delete_run_success(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Delete a run (happy path)
     
@@ -568,7 +568,7 @@ async def test_delete_run_success(async_client: AsyncClient, db: AsyncSession, t
         run_id = run.id
         
         # Make API request to delete run
-        response = await async_client.delete(f"/api/runs/{run_id}?user_id={test_user.id}")
+        response = await client.delete(f"/api/runs/{run_id}")
         
         # Verify deletion response
         assert response.status_code == 204, "Should return 204 No Content"
@@ -584,7 +584,7 @@ async def test_delete_run_success(async_client: AsyncClient, db: AsyncSession, t
 
 
 @pytest.mark.asyncio
-async def test_delete_run_cascade(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_delete_run_cascade(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Delete run CASCADE deletes tasks (referential integrity)
     
@@ -618,7 +618,7 @@ async def test_delete_run_cascade(async_client: AsyncClient, db: AsyncSession, t
         run_id = run.id
         
         # Make API request to delete run
-        response = await async_client.delete(f"/api/runs/{run_id}?user_id={test_user.id}")
+        response = await client.delete(f"/api/runs/{run_id}")
         assert response.status_code == 204
         
         # Verify database state: task was also deleted (cascade)
@@ -632,7 +632,7 @@ async def test_delete_run_cascade(async_client: AsyncClient, db: AsyncSession, t
 
 
 @pytest.mark.asyncio
-async def test_delete_run_not_found(async_client: AsyncClient, test_user: User):
+async def test_delete_run_not_found(client: AsyncClient, test_user: User):
     """
     Test: Delete run that DOESN'T EXIST (404 error)
     
@@ -651,7 +651,7 @@ async def test_delete_run_not_found(async_client: AsyncClient, test_user: User):
     try:
         # Make API request to delete non-existent run
         fake_id = uuid4()
-        response = await async_client.delete(f"/api/runs/{fake_id}?user_id={test_user.id}")
+        response = await client.delete(f"/api/runs/{fake_id}")
         
         # Verify 404 response
         assert response.status_code == 404, "Should return 404 for non-existent run"
@@ -661,7 +661,7 @@ async def test_delete_run_not_found(async_client: AsyncClient, test_user: User):
 
 
 @pytest.mark.asyncio
-async def test_delete_run_wrong_user(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_delete_run_wrong_user(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Delete run belonging to ANOTHER USER (403 error)
     
@@ -691,7 +691,7 @@ async def test_delete_run_wrong_user(async_client: AsyncClient, db: AsyncSession
         await db.commit()
         
         # Make API request as test_user (wrong user)
-        response = await async_client.delete(f"/api/runs/{run.id}?user_id={test_user.id}")
+        response = await client.delete(f"/api/runs/{run.id}")
         
         # Verify 403 response
         assert response.status_code == 403, "Should return 403 when deleting other user's run"
@@ -705,7 +705,7 @@ async def test_delete_run_wrong_user(async_client: AsyncClient, db: AsyncSession
 # ============================================================
 
 @pytest.mark.asyncio
-async def test_start_queued_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_start_queued_run(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Start a queued run (transition queued -> running)
     
@@ -730,7 +730,7 @@ async def test_start_queued_run(async_client: AsyncClient, db: AsyncSession, tes
         await db.refresh(run)
         
         # Start the run
-        response = await async_client.post(f"/api/runs/{run.id}/start?user_id={test_user.id}")
+        response = await client.post(f"/api/runs/{run.id}/start")
         
         # Verify response
         assert response.status_code == 200
@@ -748,7 +748,7 @@ async def test_start_queued_run(async_client: AsyncClient, db: AsyncSession, tes
 
 
 @pytest.mark.asyncio
-async def test_start_run_rejects_if_another_running(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_start_run_rejects_if_another_running(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Cannot start a run if another is already running
     
@@ -777,7 +777,7 @@ async def test_start_run_rejects_if_another_running(async_client: AsyncClient, d
         await db.refresh(run2)
         
         # Try to start second run
-        response = await async_client.post(f"/api/runs/{run2.id}/start?user_id={test_user.id}")
+        response = await client.post(f"/api/runs/{run2.id}/start")
         
         # Verify 409 Conflict
         assert response.status_code == 409
@@ -794,7 +794,7 @@ async def test_start_run_rejects_if_another_running(async_client: AsyncClient, d
 
 
 @pytest.mark.asyncio
-async def test_complete_run_marks_completed(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_complete_run_marks_completed(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Completing a run marks it as completed
     
@@ -818,8 +818,8 @@ async def test_complete_run_marks_completed(async_client: AsyncClient, db: Async
         await db.refresh(run)
         
         # Complete the run
-        response = await async_client.post(
-            f"/api/runs/{run.id}/complete?user_id={test_user.id}&auto_start_next=false"
+        response = await client.post(
+            f"/api/runs/{run.id}/complete?auto_start_next=false"
         )
         
         # Verify response
@@ -838,7 +838,7 @@ async def test_complete_run_marks_completed(async_client: AsyncClient, db: Async
 
 
 @pytest.mark.asyncio
-async def test_complete_run_auto_starts_next_queued_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_complete_run_auto_starts_next_queued_run(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Completing a run automatically starts the next queued run (FIFO)
     
@@ -882,7 +882,7 @@ async def test_complete_run_auto_starts_next_queued_run(async_client: AsyncClien
         await db.commit()
         
         # Complete run1 with auto_start_next=true (default)
-        response = await async_client.post(f"/api/runs/{run1.id}/complete?user_id={test_user.id}")
+        response = await client.post(f"/api/runs/{run1.id}/complete")
         
         # Verify response shows run1 completed
         assert response.status_code == 200
@@ -907,7 +907,7 @@ async def test_complete_run_auto_starts_next_queued_run(async_client: AsyncClien
 
 
 @pytest.mark.asyncio
-async def test_complete_run_with_auto_start_disabled(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_complete_run_with_auto_start_disabled(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Completing a run with auto_start_next=false doesn't start next run
     
@@ -936,8 +936,8 @@ async def test_complete_run_with_auto_start_disabled(async_client: AsyncClient, 
         await db.commit()
         
         # Complete run1 WITHOUT auto-starting next
-        response = await async_client.post(
-            f"/api/runs/{run1.id}/complete?user_id={test_user.id}&auto_start_next=false"
+        response = await client.post(
+            f"/api/runs/{run1.id}/complete?auto_start_next=false"
         )
         
         # Verify run1 completed
@@ -955,7 +955,7 @@ async def test_complete_run_with_auto_start_disabled(async_client: AsyncClient, 
 
 
 @pytest.mark.asyncio
-async def test_complete_run_when_no_queued_runs_exist(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_complete_run_when_no_queued_runs_exist(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Completing a run when no queued runs exist
     
@@ -980,7 +980,7 @@ async def test_complete_run_when_no_queued_runs_exist(async_client: AsyncClient,
         await db.refresh(run)
         
         # Complete the run
-        response = await async_client.post(f"/api/runs/{run.id}/complete?user_id={test_user.id}")
+        response = await client.post(f"/api/runs/{run.id}/complete")
         
         # Verify success
         assert response.status_code == 200
@@ -996,7 +996,7 @@ async def test_complete_run_when_no_queued_runs_exist(async_client: AsyncClient,
 
 
 @pytest.mark.asyncio
-async def test_start_run_rejects_completed_run(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_start_run_rejects_completed_run(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Cannot start a completed run
     
@@ -1019,7 +1019,7 @@ async def test_start_run_rejects_completed_run(async_client: AsyncClient, db: As
         await db.refresh(run)
         
         # Try to start it
-        response = await async_client.post(f"/api/runs/{run.id}/start?user_id={test_user.id}")
+        response = await client.post(f"/api/runs/{run.id}/start")
         
         # Verify 400 Bad Request
         assert response.status_code == 400
@@ -1031,7 +1031,7 @@ async def test_start_run_rejects_completed_run(async_client: AsyncClient, db: As
 
 
 @pytest.mark.asyncio
-async def test_start_run_already_running(async_client: AsyncClient, db: AsyncSession, test_user: User):
+async def test_start_run_already_running(client: AsyncClient, db: AsyncSession, test_user: User):
     """
     Test: Starting a run that's already running returns error
     
@@ -1053,7 +1053,7 @@ async def test_start_run_already_running(async_client: AsyncClient, db: AsyncSes
         await db.refresh(run)
         
         # Try to start it again
-        response = await async_client.post(f"/api/runs/{run.id}/start?user_id={test_user.id}")
+        response = await client.post(f"/api/runs/{run.id}/start")
         
         # Verify 400 Bad Request
         assert response.status_code == 400
