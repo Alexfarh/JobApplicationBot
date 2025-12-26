@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, Response, Cookie
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -105,39 +105,56 @@ async def request_magic_link(
 
 # Authentication Dependencies
 async def get_current_user(
-    authorization: str = Header(...),
+    auth_token: str = Cookie(None),
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
-    Dependency to get current authenticated user from token.
+    Dependency to get current authenticated user from httpOnly cookie.
     
-    Phase 1: Token is just the user_id (simple bearer token)
+    DEV MODE: If no cookie, returns a default dev user
+    Phase 1: Cookie contains just the user_id
     Future: Validate JWT and extract user_id
     
     Args:
-        authorization: Authorization header (format: "Bearer <token>")
+        auth_token: Authentication cookie (httpOnly)
         db: Database session
     
     Returns:
         User: The authenticated user
     
     Raises:
-        HTTPException 401: If token is invalid or user not found
+        HTTPException 401: If cookie is invalid or user not found
         HTTPException 403: If account is locked
     """
-    # Extract token from "Bearer <token>" format
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid authorization header format. Use: Bearer <token>"
+    # DEV MODE: If no auth token, create/return a default dev user
+    if not auth_token:
+        result = await db.execute(
+            select(User).where(User.email == "dev@example.com")
         )
+        dev_user = result.scalar_one_or_none()
+        
+        if not dev_user:
+            dev_user = User(
+                email="dev@example.com",
+                full_name="Dev User",
+                phone="555-0000",
+                mandatory_questions={
+                    "work_authorization": "yes",
+                    "veteran_status": "no",
+                    "disability_status": "no"
+                }
+            )
+            db.add(dev_user)
+            await db.commit()
+            await db.refresh(dev_user)
+            logger.info("Created dev user for bypass mode")
+        
+        return dev_user
     
-    token = authorization[7:]  # Remove "Bearer " prefix
-    
-    # Phase 1: token is just the user_id
+    # Phase 1: cookie value is just the user_id
     # Future: decode JWT and extract user_id
     try:
-        user_id = token
+        user_id = auth_token
         
         # Fetch user from database
         result = await db.execute(
@@ -233,6 +250,7 @@ def get_client_ip(request: Request) -> str:
 async def verify_token(
     verify_request: VerifyTokenRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -312,10 +330,19 @@ async def verify_token(
         
         logger.info(f"Successful login: {user.email} from IP: {user.last_login_ip}")
         
-        # In a real app, generate JWT here
-        # For now, return user ID as "token"
+        # Set httpOnly cookie with user_id
+        # In production, set secure=True for HTTPS-only
+        response.set_cookie(
+            key="auth_token",
+            value=str(user.id),
+            httponly=True,  # Prevents JavaScript access (XSS protection)
+            samesite="lax",  # CSRF protection
+            max_age=86400 * 30,  # 30 days
+            secure=False,  # Set to True in production with HTTPS
+        )
+        
         return AuthResponse(
-            access_token=str(user.id),  # Phase 1: simple user_id as token
+            access_token=str(user.id),  # Kept for compatibility, but cookie is primary
             user_id=str(user.id),
             email=user.email,
             full_name=user.full_name,
@@ -336,3 +363,25 @@ async def verify_token(
             status_code=500,
             detail="Authentication failed. Please try again."
         )
+
+
+@router.post("/logout")
+async def logout(
+    response: Response,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Logout user by clearing the authentication cookie.
+    
+    Returns:
+        200: Successfully logged out
+    """
+    response.delete_cookie(
+        key="auth_token",
+        httponly=True,
+        samesite="lax"
+    )
+    
+    logger.info(f"User logged out: {current_user.email}")
+    
+    return {"message": "Successfully logged out"}

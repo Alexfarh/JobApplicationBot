@@ -55,7 +55,7 @@ async def require_complete_profile(current_user: User = Depends(get_current_user
             missing_fields.append("email")
         if not current_user.phone:
             missing_fields.append("phone number")
-        if not current_user.resume_path:
+        if not current_user.resume_data:
             missing_fields.append("resume")
         
         # Check mandatory questions

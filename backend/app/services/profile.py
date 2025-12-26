@@ -23,7 +23,7 @@ def build_profile_response(user: User) -> ProfileResponse:
         linkedin_url=user.linkedin_url,
         github_url=user.github_url,
         portfolio_url=user.portfolio_url,
-        resume_uploaded=user.resume_path is not None,
+        resume_uploaded=user.resume_data is not None,
         resume_filename=user.resume_filename,
         resume_uploaded_at=user.resume_uploaded_at,
         resume_size_bytes=user.resume_size_bytes,
@@ -84,21 +84,24 @@ async def update_preferences(user: User, prefs_dict: dict, db: AsyncSession) -> 
     return user
 
 
-async def attach_resume(user: User, file_path: str, filename: str, file_size: int, db: AsyncSession) -> User:
-    """Attach resume info to user profile."""
-    user.resume_path = file_path
+async def attach_resume(user: User, resume_bytes: bytes, filename: str, file_size: int, db: AsyncSession) -> User:
+    """Attach resume info to user profile (DB storage)."""
+    import logging
+    logger = logging.getLogger(__name__)
+    user.resume_data = resume_bytes
     user.resume_filename = filename
     user.resume_uploaded_at = datetime.utcnow()
     user.resume_size_bytes = file_size
     user.updated_at = datetime.utcnow()
     await db.commit()
     await db.refresh(user)
+    logger.info(f"[DEBUG] After attach_resume: resume_data is {'set' if user.resume_data else 'None'}, resume_filename={user.resume_filename}")
     return user
 
 
 async def remove_resume(user: User, db: AsyncSession) -> User:
-    """Remove resume info from user profile."""
-    user.resume_path = None
+    """Remove resume info from user profile (DB storage)."""
+    user.resume_data = None
     user.resume_filename = None
     user.resume_uploaded_at = None
     user.resume_size_bytes = None

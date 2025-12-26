@@ -44,47 +44,11 @@ def validate_resume_file(file: UploadFile) -> None:
             )
 
 
-def save_resume(user: User, file: UploadFile) -> tuple[str, str, int]:
+def save_resume(user: User, file: UploadFile):
     """
-    Save resume file to disk and return file info.
-    
-    Deletes old resume if one exists.
-    
-    Args:
-        user: User object
-        file: Uploaded file
-        
-    Returns:
-        Tuple of (file_path, original_filename, file_size)
+    (Deprecated) No longer used. Resume is now stored in DB.
     """
-    import shutil
-    
-    # Delete old resume if exists
-    if user.resume_path:
-        logger.info(f"Deleting old resume: {user.resume_path}")
-        delete_resume_file(user.resume_path)
-    else:
-        logger.info("No old resume to delete")
-    
-    # Create directory
-    user_resume_dir = get_user_resume_dir(str(user.id))
-    user_resume_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Generate filename
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")  # Add microseconds
-    ext = Path(file.filename).suffix
-    resume_filename = f"resume_{timestamp}{ext}"
-    resume_path = user_resume_dir / resume_filename
-    
-    logger.info(f"Saving new resume to: {resume_path}")
-    
-    # Save file
-    with open(resume_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    
-    file_size = os.path.getsize(resume_path)
-    
-    return str(resume_path), file.filename, file_size
+    raise NotImplementedError("Resume disk storage is deprecated. Store resume in DB.")
 
 
 def delete_resume_file(file_path: str) -> None:

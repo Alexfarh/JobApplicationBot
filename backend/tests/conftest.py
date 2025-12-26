@@ -192,11 +192,11 @@ async def test_user(db: AsyncSession) -> User:
 @pytest_asyncio.fixture
 async def client(async_client: AsyncClient, test_user: User) -> AsyncClient:
     """
-    Authenticated client with Bearer token headers.
+    Authenticated client with httpOnly cookie.
     
-    Phase 1: Token is just the user_id.
+    Phase 1: Cookie contains just the user_id.
     Uses test_user fixture to ensure user exists.
     """
-    # Add auth header to client
-    async_client.headers["Authorization"] = f"Bearer {test_user.id}"
+    # Set auth cookie on client
+    async_client.cookies.set("auth_token", str(test_user.id))
     return async_client

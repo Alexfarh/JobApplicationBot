@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Integer, Enum as SQLEnum, Text, JSON
+from sqlalchemy import Column, String, DateTime, Integer, Enum as SQLEnum, Text, JSON, LargeBinary
 from sqlalchemy.dialects.postgresql import JSONB
 import uuid
 import enum
@@ -55,7 +55,7 @@ class User(Base):
     portfolio_url = Column(String(500), nullable=True)
     
     # Resume storage
-    resume_path = Column(String(500), nullable=True)  # File path: /data/resumes/{user_id}/resume.pdf
+    resume_data = Column(LargeBinary, nullable=True)  # Stores the actual file content
     resume_uploaded_at = Column(DateTime, nullable=True)
     resume_filename = Column(String(255), nullable=True)  # Original filename
     resume_size_bytes = Column(Integer, nullable=True)  # File size for validation
@@ -102,7 +102,7 @@ class User(Base):
         - Mandatory questions answered (all defined questions must have answers)
         """
         # Required fields must exist
-        if not all([self.full_name, self.email, self.phone, self.resume_path]):
+        if not all([self.full_name, self.email, self.phone, self.resume_data]):
             return False
         
         # Mandatory questions must exist and have all required fields answered

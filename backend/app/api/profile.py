@@ -8,13 +8,14 @@ Provides endpoints for users to manage their profiles including:
 - Automation preferences
 """
 from datetime import datetime
+import io
 import logging
 import os
 from pathlib import Path
 import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -132,9 +133,10 @@ async def upload_resume(
     """
     try:
         validate_resume_file(file)
-        resume_path, resume_filename, file_size = save_resume(current_user, file)
-        await attach_resume(current_user, str(resume_path), file.filename, file_size, db)
-        
+        file_bytes = await file.read()
+        file_size = len(file_bytes)
+        resume_filename = file.filename
+        await attach_resume(current_user, file_bytes, resume_filename, file_size, db)
         logger.info(f"Resume uploaded for user {current_user.email}: {resume_filename}")
         return build_profile_response(current_user)
     except HTTPException:
@@ -143,38 +145,25 @@ async def upload_resume(
         logger.error(f"Error uploading resume: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload resume")
 
-
 @router.get("/profile/resume")
 async def download_resume(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Download user's resume file.
-    
-    Returns:
-        FileResponse: Resume file download
-        404: If no resume uploaded
+    Download user's resume file from the database.
     """
-    if not current_user.resume_path:
+    if not current_user.resume_data:
         raise HTTPException(
             status_code=404,
             detail="No resume uploaded"
         )
-    
-    resume_path = Path(current_user.resume_path)
-    if not resume_path.exists():
-        logger.error(f"Resume file not found: {resume_path}")
-        raise HTTPException(
-            status_code=404,
-            detail="Resume file not found"
-        )
-    
-    return FileResponse(
-        path=resume_path,
-        filename=current_user.resume_filename or "resume.pdf",
-        media_type="application/octet-stream"
+    return StreamingResponse(
+        io.BytesIO(current_user.resume_data),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{current_user.resume_filename or "resume.pdf"}"'
+        }
     )
-
 
 @router.delete("/profile/resume", response_model=ProfileResponse)
 async def delete_resume(
@@ -182,21 +171,21 @@ async def delete_resume(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Delete user's resume file.
-    
-    Returns:
-        ProfileResponse: Updated profile with resume removed
-        404: If no resume uploaded
+    Delete user's resume from the database.
     """
-    if not current_user.resume_path:
+    if not current_user.resume_data:
         raise HTTPException(status_code=404, detail="No resume uploaded")
-    
     try:
-        delete_resume_file(current_user.resume_path)
-        await remove_resume(current_user, db)
-        
+        current_user.resume_data = None
+        current_user.resume_filename = None
+        current_user.resume_uploaded_at = None
+        current_user.resume_size_bytes = None
+        await db.commit()
+        await db.refresh(current_user)
         logger.info(f"Resume deleted for user {current_user.email}")
         return build_profile_response(current_user)
     except Exception as e:
+        await db.rollback()
         logger.error(f"Error deleting resume: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to delete resume")
+    

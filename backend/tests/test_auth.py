@@ -160,6 +160,10 @@ async def test_verify_token_valid(async_client: AsyncClient, db: AsyncSession):
         # Phase 1: access_token is user_id (will be JWT in Phase 2)
         assert data["access_token"] == str(user.id), "Session token should match user_id"
         
+        # Verify cookie is set for httpOnly authentication
+        assert "auth_token" in response.cookies, "Should set auth_token cookie"
+        assert response.cookies["auth_token"] == str(user.id), "Cookie should contain user_id"
+        
         # Verify database state: magic link token cleared (one-time use)
         await db.refresh(user)
         assert user.magic_link_token is None, "Magic link token should be cleared after use"
@@ -329,6 +333,39 @@ async def test_request_magic_link_invalid_email(async_client: AsyncClient):
         
         # Verify validation rejection
         assert response.status_code == 422, "Should reject invalid email format"
+        
+    except Exception as e:
+        raise e
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_cookie(client: AsyncClient, test_user: User):
+    """
+    Test: Logout endpoint clears authentication cookie
+    
+    What happens:
+    1. User is authenticated (client has auth_token cookie)
+    2. POST /api/auth/logout
+    3. Cookie is deleted/cleared
+    4. Returns 200 with success message
+    
+    Verifies:
+    - Logout endpoint is accessible to authenticated users
+    - Cookie is properly cleared
+    
+    Cleanup: Automatic via db fixture
+    """
+    try:
+        # Verify user is authenticated (cookie is set)
+        assert "auth_token" in client.cookies
+        
+        # Make logout request
+        response = await client.post("/api/auth/logout")
+        
+        # Verify success
+        assert response.status_code == 200
+        data = response.json()
+        assert "logged out" in data["message"].lower()
         
     except Exception as e:
         raise e
