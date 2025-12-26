@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { TaskState } from "@/lib/api"
 
+
 export default function TasksPage() {
   const [stateFilter, setStateFilter] = useState<string>("all")
   const [runFilter, setRunFilter] = useState<string>("all")
@@ -24,7 +25,8 @@ export default function TasksPage() {
         }
 
   const { data: tasks, isLoading } = useTasks(params)
-  const { data: runs } = useRuns()
+  const { data } = useRuns()
+  const runs = data?.runs ?? []
   const resumeTask = useResumeTask()
   const { toast } = useToast()
 

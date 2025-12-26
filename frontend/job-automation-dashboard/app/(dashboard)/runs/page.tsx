@@ -21,8 +21,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 
+
 export default function RunsPage() {
-  const { data: runs, isLoading } = useRuns()
+  const { data: runsData, isLoading } = useRuns()
+  const runs = Array.isArray(runsData?.runs) ? runsData.runs : []
   const deleteRun = useDeleteRun()
   const startRun = useStartRun()
   const { toast } = useToast()
@@ -83,7 +85,7 @@ export default function RunsPage() {
                     <CardTitle className="text-xl">{run.name}</CardTitle>
                     {run.description && <p className="text-sm text-muted-foreground">{run.description}</p>}
                     <p className="text-xs text-muted-foreground">
-                      Created {formatDistanceToNow(new Date(run.created_at), { addSuffix: true })}
+                      Created {formatDistanceToNow(new Date(run.created_at.endsWith('Z') ? run.created_at : run.created_at + 'Z'), { addSuffix: true })}
                     </p>
                   </div>
                   <Badge variant={run.status === "running" ? "default" : "outline"}>
