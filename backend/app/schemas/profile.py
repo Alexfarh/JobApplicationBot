@@ -17,6 +17,15 @@ class ProfileUpdateRequest(BaseModel):
     github_url: Optional[HttpUrl] = None
     portfolio_url: Optional[HttpUrl] = None
 
+    # Target companies for job discovery (user-provided or default)
+    target_companies: Optional[list[str]] = None
+
+    # Salary expectation fields (optional, used for job matching)
+    expected_salary_hourly_min: Optional[int] = 30
+    expected_salary_annual_min: Optional[int] = 65000
+    expected_salary_currency: Optional[str] = "CAD"
+    salary_flexibility_note: Optional[str] = None
+
 
 class MandatoryQuestionsRequest(BaseModel):
     """Request body for updating mandatory questions."""
@@ -58,6 +67,15 @@ class ProfileResponse(BaseModel):
     linkedin_url: Optional[str] = None
     github_url: Optional[str] = None
     portfolio_url: Optional[str] = None
+
+    # Target companies for job discovery (user-provided or default)
+    target_companies: Optional[list[str]] = None
+
+    # Salary expectation fields (optional, used for job matching)
+    expected_salary_hourly_min: Optional[int] = 30
+    expected_salary_annual_min: Optional[int] = 65000
+    expected_salary_currency: Optional[str] = "CAD"
+    salary_flexibility_note: Optional[str] = None
     
     # Resume info
     resume_uploaded: bool = False

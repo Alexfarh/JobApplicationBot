@@ -75,6 +75,22 @@ class User(Base):
             "preferred_platforms": ["greenhouse"]
         }
     )
+
+    # Target companies for job discovery (user-provided or default)
+    # List of company names or URLs
+    target_companies = Column(JSON, nullable=True, default=lambda: [
+        "Google", "Meta", "Amazon", "Apple", "Netflix", "Microsoft", "NVIDIA", "OpenAI", "Anthropic", "Tesla",
+        "Stripe", "Databricks", "Snowflake", "Cloudflare", "Shopify", "Uber", "Airbnb", "Coinbase", "Palantir", "Roblox",
+        "Scale AI", "Hugging Face", "Mistral AI", "Figma", "Notion", "Asana", "Elastic", "MongoDB", "Confluent", "GitHub",
+        "Vercel", "Supabase", "Render", "Replicate", "Weights & Biases", "Pinecone", "Cohere", "Perplexity AI", "Cursor", "Replit",
+        "Jane Street", "Citadel", "Goldman Sachs", "Morgan Stanley", "Bloomberg", "RBC", "TD Bank", "SAP", "IBM", "Qualcomm"
+    ])
+
+    # Salary expectation fields (optional, used for job matching)
+    expected_salary_hourly_min = Column(Integer, nullable=True, default=30)
+    expected_salary_annual_min = Column(Integer, nullable=True, default=65000)
+    expected_salary_currency = Column(String(10), nullable=True, default="CAD")
+    salary_flexibility_note = Column(Text, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
