@@ -7,7 +7,6 @@ Create Date: 2025-12-24 22:56:07.756009+00:00
 """
 from alembic import op
 import sqlalchemy as sa
-from app.database_types import GUID, JSON
 
 
 # revision identifiers, used by Alembic.

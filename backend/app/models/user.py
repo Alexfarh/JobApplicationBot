@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Integer, Enum as SQLEnum, Text, JSON, LargeBinary
+from sqlalchemy import Column, String, DateTime, Integer, Enum as SQLEnum, Text, JSON, LargeBinary, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 import uuid
 import enum
@@ -91,6 +91,32 @@ class User(Base):
     expected_salary_annual_min = Column(Integer, nullable=True, default=65000)
     expected_salary_currency = Column(String(10), nullable=True, default="CAD")
     salary_flexibility_note = Column(Text, nullable=True)
+    
+    # Job preference fields
+    # Only apply to internships
+    internship_only = Column(Boolean, default=True, nullable=False)
+    # Preferred job types: software engineer, devops, ai engineer, fullstack, backend, frontend, etc.
+    preferred_job_types = Column(
+        JSON,
+        nullable=False,
+        default=lambda: [
+            "software engineer",
+            "software developer",
+            "backend engineer",
+            "backend developer",
+            "fullstack engineer",
+            "full-stack engineer",
+            "full stack engineer",
+            "devops engineer",
+            "devops",
+            "ai engineer",
+            "machine learning engineer",
+            "ml engineer",
+            "data scientist",
+            "sre",
+            "security engineer",
+        ]
+    )
     
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

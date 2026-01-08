@@ -1,5 +1,6 @@
 """Job-related Pydantic schemas."""
 from typing import Optional, List, Literal
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
@@ -8,6 +9,7 @@ class JobBase(BaseModel):
     job_url: str
     apply_url: str
     source: Optional[str] = None  # e.g., "greenhouse", "workday"
+    external_job_id: Optional[str] = None  # e.g., Greenhouse job ID for deduplication
     job_title: Optional[str] = None
     company_name: Optional[str] = None
     location_text: Optional[str] = None
