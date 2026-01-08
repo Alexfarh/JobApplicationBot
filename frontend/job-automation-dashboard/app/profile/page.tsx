@@ -12,14 +12,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ProtectedRoute } from "@/components/protected-route"
-import { Loader2, Upload, FileText, Trash2 } from "lucide-react"
+import { Loader2, Upload, FileText, Trash2, Edit2 } from "lucide-react"
+import { ProfileHeader } from "@/components/profile/profile-header"
+import { ResumeDataDisplay } from "@/components/profile/resume-data-display"
+import { useProfile } from "@/hooks/use-profile"
 
 export default function ProfilePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const isOnboarding = searchParams.get("onboarding") === "true"
 
-  const [profile, setProfile] = useState<ProfileResponse | null>(null)
+  // Use the new hook
+  const { profile, loading, error: hookError } = useProfile()
+  
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState("")
@@ -55,7 +60,6 @@ export default function ProfilePage() {
   const loadProfile = async () => {
     try {
       const data = await profileAPI.get()
-      setProfile(data)
 
       // Populate form
       setFullName(data.full_name || "")
@@ -203,11 +207,37 @@ export default function ProfilePage() {
     router.push("/dashboard")
   }
 
-  if (isLoading) {
+  if (isLoading || loading) {
     return (
       <ProtectedRoute>
-        <div className="min-h-screen flex items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+        <div className="min-h-screen bg-neutral-900 flex items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  if (hookError) {
+    return (
+      <ProtectedRoute>
+        <div className="min-h-screen bg-neutral-900 py-8 px-4">
+          <div className="max-w-5xl mx-auto">
+            <Alert variant="destructive">
+              <AlertDescription>{hookError}</AlertDescription>
+            </Alert>
+          </div>
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <ProtectedRoute>
+        <div className="min-h-screen bg-neutral-900 py-8 px-4">
+          <div className="max-w-5xl mx-auto">
+            <p className="text-slate-400">No profile found</p>
+          </div>
         </div>
       </ProtectedRoute>
     )
@@ -215,28 +245,125 @@ export default function ProfilePage() {
 
   return (
     <ProtectedRoute>
-      <div className="min-h-screen bg-neutral-900 py-8 px-4">
-        <div className="max-w-4xl mx-auto">
+      <div className="min-h-screen bg-slate-950 py-8 px-4">
+        <div className="max-w-5xl mx-auto">
           {isOnboarding && (
-            <Alert className="mb-6">
-              <AlertDescription>
-                👋 Welcome! Please complete your profile to start automating job applications.
+            <Alert className="mb-6 bg-blue-500/10 border-blue-500/20">
+              <AlertDescription className="text-blue-200">
+                👋 Welcome! Here's your profile with extracted resume data.
               </AlertDescription>
             </Alert>
           )}
+
           <Button
             variant="ghost"
-            className="mb-6 bg-black text-white border border-white hover:bg-black hover:text-white hover:border-blue-400 focus-visible:ring-2 focus-visible:ring-blue-400 transition-all duration-150 hover:scale-105 active:scale-95 shadow-lg outline-none"
+            className="mb-6 bg-slate-900 text-white border border-slate-700 hover:bg-slate-800 hover:border-blue-400"
             onClick={() => router.push('/')}
-            >
+          >
             ← Back to Dashboard
           </Button>
-          <Card>
+
+          {/* PROFILE VIEW SECTION */}
+          <div className="mb-12">
+            {/* Profile Header with Resume Data */}
+            {profile && <ProfileHeader profile={profile} />}
+
+            {/* Resume Data Display */}
+            <div className="mt-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {/* Left Column: Resume Data */}
+              <div className="lg:col-span-2">
+                {profile.resume_data ? (
+                  <ResumeDataDisplay resume={profile.resume_data} />
+                ) : (
+                  <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-8 text-center">
+                    <FileText className="w-12 h-12 text-slate-500 mx-auto mb-4" />
+                    <p className="text-slate-400">No resume uploaded yet</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Status and Preferences */}
+              <div className="space-y-6">
+                {/* Resume Status */}
+                <Card className="bg-slate-900/50 border-slate-700">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Resume Status</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {profile.resume_uploaded ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 bg-green-400 rounded-full"></span>
+                          <p className="text-sm text-green-300 font-medium">Uploaded</p>
+                        </div>
+                        {profile.resume_filename && (
+                          <p className="text-xs text-slate-400">{profile.resume_filename}</p>
+                        )}
+                        {profile.resume_size_bytes && (
+                          <p className="text-xs text-slate-500">
+                            {(profile.resume_size_bytes / 1024).toFixed(1)} KB
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 bg-slate-500 rounded-full"></span>
+                        <p className="text-sm text-slate-400">Not uploaded</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Job Preferences */}
+                <Card className="bg-slate-900/50 border-slate-700">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base">Job Preferences</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div>
+                      <p className="text-xs text-slate-400 mb-1">Internship Only</p>
+                      <p className="text-sm font-medium text-white">
+                        {profile.internship_only ? '✓ Yes' : 'No'}
+                      </p>
+                    </div>
+                    {profile.preferred_job_types && profile.preferred_job_types.length > 0 && (
+                      <div>
+                        <p className="text-xs text-slate-400 mb-2">Preferred Roles</p>
+                        <div className="flex flex-wrap gap-2">
+                          {profile.preferred_job_types.slice(0, 4).map((type) => (
+                            <span
+                              key={type}
+                              className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded text-xs"
+                            >
+                              {type}
+                            </span>
+                          ))}
+                          {profile.preferred_job_types.length > 4 && (
+                            <span className="px-2 py-1 text-slate-400 text-xs">
+                              +{profile.preferred_job_types.length - 4} more
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          </div>
+
+          {/* EDIT MODE SECTION */}
+          <Card className="bg-slate-900/50 border-slate-700">
             <CardHeader>
-              <CardTitle>Your Profile</CardTitle>
-              <CardDescription>
-                Manage your personal information, resume, and automation preferences
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Edit2 className="w-5 h-5" />
+                    Edit Profile
+                  </CardTitle>
+                  <CardDescription>Update your personal information and settings</CardDescription>
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
               {error && (

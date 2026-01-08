@@ -4,6 +4,40 @@ from typing import Optional
 from pydantic import BaseModel, HttpUrl
 
 
+class ExperienceSchema(BaseModel):
+    """Work experience from resume."""
+    company: str
+    title: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    duration_years: Optional[float] = None
+    description: Optional[str] = None
+
+
+class EducationSchema(BaseModel):
+    """Education from resume."""
+    institution: str
+    degree: str
+    field: Optional[str] = None
+    graduation_year: Optional[str] = None
+
+
+class ResumeDataSchema(BaseModel):
+    """Extracted resume data."""
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    github: Optional[str] = None
+    linkedin: Optional[str] = None
+    portfolio: Optional[str] = None
+    skills: list[str] = []
+    experience: list[ExperienceSchema] = []
+    education: list[EducationSchema] = []
+    projects: list[str] = []
+    total_experience_years: Optional[float] = None
+    seniority_level: Optional[str] = None
+
+
 class ProfileUpdateRequest(BaseModel):
     """Request body for updating user profile."""
     full_name: Optional[str] = None
@@ -82,6 +116,11 @@ class ProfileResponse(BaseModel):
     resume_filename: Optional[str] = None
     resume_uploaded_at: Optional[datetime] = None
     resume_size_bytes: Optional[int] = None
+    resume_data: Optional[ResumeDataSchema] = None
+    
+    # Job preferences
+    internship_only: bool = True
+    preferred_job_types: list[str] = []
     
     # Data fields
     mandatory_questions: Optional[dict] = None
