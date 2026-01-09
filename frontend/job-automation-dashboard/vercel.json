@@ -1,7 +1,4 @@
 {
   "buildCommand": "next build",
-  "outputDirectory": ".next",
-  "env": {
-    "NEXT_PUBLIC_API_URL": "@next_public_api_url"
-  }
+  "outputDirectory": ".next"
 }
