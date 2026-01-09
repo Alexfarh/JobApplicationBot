@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { profileAPI, type ProfileResponse } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,7 @@ import { ProfileHeader } from "@/components/profile/profile-header"
 import { ResumeDataDisplay } from "@/components/profile/resume-data-display"
 import { useProfile } from "@/hooks/use-profile"
 
-export default function ProfilePage() {
+function ProfilePageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const isOnboarding = searchParams.get("onboarding") === "true"
@@ -266,5 +266,13 @@ export default function ProfilePage() {
         </div>
       </div>
     </ProtectedRoute>
+  )
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+      <ProfilePageContent />
+    </Suspense>
   )
 }
