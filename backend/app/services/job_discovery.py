@@ -95,11 +95,38 @@ async def fetch_greenhouse_jobs(
                 return []
 
 
+def _extract_work_mode(job_content: str) -> Optional[str]:
+    """Extract work mode (remote, hybrid, onsite) from job content."""
+    if not job_content:
+        return None
+    
+    content_lower = job_content.lower()
+    
+    # Check for remote
+    if "fully remote" in content_lower or ("remote" in content_lower and "not remote" not in content_lower):
+        return "remote"
+    
+    # Check for hybrid
+    if "hybrid" in content_lower:
+        return "hybrid"
+    
+    # Check for onsite/on-site
+    if "on-site" in content_lower or "onsite" in content_lower:
+        return "onsite"
+    
+    # Default to None if not found
+    return None
+
+
 def normalize_greenhouse_job(raw_job: dict, company_name: str) -> Optional[JobDiscoveryResponse]:
     title = raw_job.get("title")
     apply_url = raw_job.get("absolute_url")
     if not title or not apply_url:
         return None  # skip malformed jobs
+    
+    # Extract work_mode from job content/description
+    work_mode = _extract_work_mode(raw_job.get("content") or "")
+    
     # Parse posted_at as datetime if present
     posted_at_raw = raw_job.get("updated_at")
     posted_at = None
@@ -113,7 +140,7 @@ def normalize_greenhouse_job(raw_job: dict, company_name: str) -> Optional[JobDi
         job_title=title,
         location_text=(raw_job.get("location") or {}).get("name"),
         employment_type=None,
-        work_mode=None,
+        work_mode=work_mode,
         description_raw=raw_job.get("content"),   # sometimes present; otherwise None
         description_clean=None,
         apply_url=apply_url,

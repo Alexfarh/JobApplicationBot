@@ -249,8 +249,14 @@ async def ingest_greenhouse_jobs(
             ingested_count += 1
             logger.debug(f"Ingested job: {job_create.job_title}")
         except Exception as e:
-            logger.error(f"Error ingesting job {job_create.job_title}: {str(e)}")
-            skipped_count += 1
+            error_msg = str(e)
+            # Handle unique constraint violations gracefully (duplicate job)
+            if "uq_company_external_id_ats" in error_msg or "UNIQUE constraint failed" in error_msg:
+                logger.debug(f"Job already exists (duplicate): {job_create.job_title} from {company_name}")
+                skipped_count += 1
+            else:
+                logger.error(f"Error ingesting job {job_create.job_title}: {error_msg}")
+                skipped_count += 1
     
     # Update last_ingested_at
     company = await db.execute(select(Company).where(Company.id == company_id))

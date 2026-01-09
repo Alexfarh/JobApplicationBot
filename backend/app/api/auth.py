@@ -111,7 +111,6 @@ async def get_current_user(
     """
     Dependency to get current authenticated user from httpOnly cookie.
     
-    DEV MODE: If no cookie, returns a default dev user
     Phase 1: Cookie contains just the user_id
     Future: Validate JWT and extract user_id
     
@@ -126,30 +125,9 @@ async def get_current_user(
         HTTPException 401: If cookie is invalid or user not found
         HTTPException 403: If account is locked
     """
-    # DEV MODE: If no auth token, create/return a default dev user
+    # Require authentication
     if not auth_token:
-        result = await db.execute(
-            select(User).where(User.email == "dev@example.com")
-        )
-        dev_user = result.scalar_one_or_none()
-        
-        if not dev_user:
-            dev_user = User(
-                email="dev@example.com",
-                full_name="Dev User",
-                phone="555-0000",
-                mandatory_questions={
-                    "work_authorization": "yes",
-                    "veteran_status": "no",
-                    "disability_status": "no"
-                }
-            )
-            db.add(dev_user)
-            await db.commit()
-            await db.refresh(dev_user)
-            logger.info("Created dev user for bypass mode")
-        
-        return dev_user
+        raise HTTPException(status_code=401, detail="Not authenticated")
     
     # Phase 1: cookie value is just the user_id
     # Future: decode JWT and extract user_id

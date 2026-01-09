@@ -34,6 +34,16 @@ class JobResponse(JobBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class JobListResponse(BaseModel):
+    """Schema for paginated job list response."""
+    jobs: list[JobResponse]
+    total: int
+    skip: int
+    limit: int
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
 class JobDiscoveryResponse(BaseModel):
     company_name: str
     job_title: str

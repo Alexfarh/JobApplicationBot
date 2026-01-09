@@ -54,6 +54,10 @@ class ProfileUpdateRequest(BaseModel):
     # Target companies for job discovery (user-provided or default)
     target_companies: Optional[list[str]] = None
 
+    # Job preferences
+    preferred_job_types: Optional[list[str]] = None
+    internship_only: Optional[bool] = None
+
     # Salary expectation fields (optional, used for job matching)
     expected_salary_hourly_min: Optional[int] = 30
     expected_salary_annual_min: Optional[int] = 65000

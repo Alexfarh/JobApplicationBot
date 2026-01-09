@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { useJobs, useDeleteJob } from "@/lib/hooks/use-api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { CreateJobDialog } from "@/components/create-job-dialog"
+import { IngestJobsDialog } from "@/components/ingest-jobs-dialog"
 import { Trash2, ExternalLink, Loader2, Search, Filter } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -26,20 +27,32 @@ export default function JobsPage() {
   const [appliedFilter, setAppliedFilter] = useState<string>("all")
   const [workModeFilter, setWorkModeFilter] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
+  const [page, setPage] = useState(0)
+  const pageSize = 50
 
-  const params =
-    appliedFilter === "all" && workModeFilter === "all"
-      ? undefined
-      : {
-          applied: appliedFilter === "applied" ? true : appliedFilter === "not-applied" ? false : undefined,
-          work_mode: workModeFilter === "all" ? undefined : workModeFilter,
-        }
+  const params = useMemo(() => {
+    const p: any = {
+      skip: page * pageSize,
+      limit: pageSize,
+    }
+    if (appliedFilter !== "all") {
+      p.applied = appliedFilter === "applied" ? true : false
+    }
+    if (workModeFilter !== "all") {
+      p.work_mode = workModeFilter
+    }
+    return p
+  }, [appliedFilter, workModeFilter, page])
 
-  const { data: jobs, isLoading } = useJobs(params)
+  const { data: jobsData, isLoading } = useJobs(params)
+  const jobs = jobsData?.jobs || []
+  const total = jobsData?.total || 0
+  const totalPages = Math.ceil(total / pageSize)
+  
   const deleteJob = useDeleteJob()
   const { toast } = useToast()
 
-  const filteredJobs = jobs?.filter((job) => {
+  const filteredJobs = jobs.filter((job) => {
     const searchLower = searchQuery.toLowerCase()
     return (
       job.job_title?.toLowerCase().includes(searchLower) ||
@@ -69,9 +82,14 @@ export default function JobsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Job Postings</h1>
-          <p className="text-muted-foreground">Manage your ingested job postings</p>
+          <p className="text-muted-foreground">
+            {total > 0 ? `${total} total jobs` : "Manage your ingested job postings"}
+          </p>
         </div>
-        <CreateJobDialog />
+        <div className="flex gap-2">
+          <IngestJobsDialog />
+          <CreateJobDialog />
+        </div>
       </div>
 
       {/* Filters */}
@@ -216,6 +234,38 @@ export default function JobsPage() {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Pagination */}
+      {jobs.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Showing {page * pageSize + 1} to {Math.min((page + 1) * pageSize, total)} of {total} jobs
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(Math.max(0, page - 1))}
+              disabled={page === 0}
+            >
+              Previous
+            </Button>
+            <div className="flex items-center gap-2 px-3">
+              <span className="text-sm">
+                Page {page + 1} of {totalPages}
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+              disabled={page >= totalPages - 1}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -6,7 +6,7 @@ import logging
 from typing import List, Optional, Dict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 
 from app.services.job_discovery import discover_greenhouse_for_targets
 from app.services.job_ingestion import seed_companies, ingest_all_greenhouse_companies
@@ -48,59 +48,13 @@ async def ingest_greenhouse_jobs(
         await seed_companies(db)
         logger.info("Companies table seeded")
         
-        # Step 2: Define create_job logic as a callable
-        async def create_job_wrapper(job: JobCreate, company_id: str, db: AsyncSession):
-            # Check if job already exists by apply_url
-            result = await db.execute(
-                select(JobPosting).where(JobPosting.apply_url == job.apply_url)
-            )
-            existing_job = result.scalar_one_or_none()
-            
-            if existing_job:
-                if existing_job.has_been_applied_to:
-                    logger.info(f"Job already applied to, skipping: {job.apply_url}")
-                    return None
-                else:
-                    logger.info(f"Job exists but not applied, updating: {job.apply_url}")
-                    return existing_job
-            
-            # Create new job
-            new_job = JobPosting(
-                company_id=company_id,
-                external_job_id=job.external_job_id or "unknown",  # Use provided ID or fallback
-                ats_type="greenhouse",
-                job_url=job.job_url,
-                apply_url=job.apply_url,
-                source=job.source,
-                job_title=job.job_title,
-                company_name=job.company_name,
-                location_text=job.location_text,
-                work_mode=job.work_mode,
-                employment_type=job.employment_type,
-                industry=job.industry,
-                description_raw=job.description_raw,
-                description_clean=job.description_clean,
-                skills=job.skills,
-                has_been_applied_to=False
-            )
-            
-            db.add(new_job)
-            await db.commit()
-            await db.refresh(new_job)
-            
-            logger.info(f"Created new job: {job.job_title} at {job.company_name}")
-            return new_job
-        
-        # Step 3: Ingest jobs from all companies
-        logger.info(f"About to call ingest_all_greenhouse_companies from module: {ingest_all_greenhouse_companies.__module__}")
-        print(f"DEBUG API: Calling ingest_all_greenhouse_companies: {ingest_all_greenhouse_companies}", flush=True)
+        # Step 2: Ingest jobs from all companies
+        logger.info(f"About to call ingest_all_greenhouse_companies")
         results = await ingest_all_greenhouse_companies(
             db,
-            create_job_wrapper,
             current_user=current_user,
             min_match_score=50  # Only ingest jobs with 50+ match score
         )
-        print(f"DEBUG API: Got results: {results}", flush=True)
         
         logger.info(f"Job ingestion completed. Results: {results}")
         return results
@@ -174,7 +128,7 @@ async def create_job(
     return new_job
 
 
-@router.get("/", response_model=list[JobResponse])
+@router.get("/", response_model=dict)
 async def list_jobs(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -187,10 +141,10 @@ async def list_jobs(
 ):
     """
     List job postings with optional filtering.
-    Returns paginated results.
+    Returns paginated results with total count.
     """
     # Build query with filters
-    query = select(JobPosting)
+    base_query = select(JobPosting)
     
     filters = []
     if applied is not None:
@@ -203,17 +157,30 @@ async def list_jobs(
         filters.append(JobPosting.work_mode == work_mode)
     
     if filters:
-        query = query.where(and_(*filters))
+        base_query = base_query.where(and_(*filters))
     
-    # Apply pagination
-    query = query.offset(skip).limit(limit)
+    # Get total count
+    count_query = select(func.count()).select_from(JobPosting)
+    if filters:
+        count_query = count_query.where(and_(*filters))
+    
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+    
+    # Apply pagination to data query
+    query = base_query.offset(skip).limit(limit)
     
     result = await db.execute(query)
     jobs = result.scalars().all()
     
     logger.info(f"Listed {len(jobs)} jobs (filters: applied={applied}, company={company})")
     
-    return jobs
+    return {
+        "jobs": [JobResponse.model_validate(job) for job in jobs],
+        "total": total,
+        "skip": skip,
+        "limit": limit
+    }
 
 
 @router.get("/{job_id}", response_model=JobResponse)

@@ -2,17 +2,12 @@
 
 import { useState, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
-import { profileAPI, type ProfileResponse, type MandatoryQuestions } from "@/lib/auth"
+import { profileAPI, type ProfileResponse } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { ProtectedRoute } from "@/components/protected-route"
-import { Loader2, Upload, FileText, Trash2, Edit2 } from "lucide-react"
+import { Loader2, Upload, FileText, Trash2 } from "lucide-react"
 import { ProfileHeader } from "@/components/profile/profile-header"
 import { ResumeDataDisplay } from "@/components/profile/resume-data-display"
 import { useProfile } from "@/hooks/use-profile"
@@ -26,28 +21,7 @@ export default function ProfilePage() {
   const { profile, loading, error: hookError } = useProfile()
   
   const [isLoading, setIsLoading] = useState(true)
-  const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
-
-  // Form state
-  const [fullName, setFullName] = useState("")
-  const [phone, setPhone] = useState("")
-  const [addressCity, setAddressCity] = useState("")
-  const [addressState, setAddressState] = useState("")
-  const [addressCountry, setAddressCountry] = useState("Canada")
-  const [linkedinUrl, setLinkedinUrl] = useState("")
-  const [githubUrl, setGithubUrl] = useState("")
-  const [portfolioUrl, setPortfolioUrl] = useState("")
-
-  // Questions state
-  const [workAuth, setWorkAuth] = useState("")
-  const [veteranStatus, setVeteranStatus] = useState("")
-  const [disabilityStatus, setDisabilityStatus] = useState("")
-
-  // Preferences state
-  const [optimisticMode, setOptimisticMode] = useState(true)
-  const [requireApproval, setRequireApproval] = useState(true)
 
   // Resume state
   const [resumeFile, setResumeFile] = useState<File | null>(null)
@@ -59,99 +33,12 @@ export default function ProfilePage() {
 
   const loadProfile = async () => {
     try {
-      const data = await profileAPI.get()
-
-      // Populate form
-      setFullName(data.full_name || "")
-      setPhone(data.phone || "")
-      setAddressCity(data.address_city || "")
-      setAddressState(data.address_state || "")
-      setAddressCountry(data.address_country || "Canada")
-      setLinkedinUrl(data.linkedin_url || "")
-      setGithubUrl(data.github_url || "")
-      setPortfolioUrl(data.portfolio_url || "")
-
-      if (data.mandatory_questions) {
-        setWorkAuth(data.mandatory_questions.work_authorization || "")
-        setVeteranStatus(data.mandatory_questions.veteran_status || "")
-        setDisabilityStatus(data.mandatory_questions.disability_status || "")
-      }
-
-      setOptimisticMode(data.preferences.optimistic_mode)
-      setRequireApproval(data.preferences.require_approval)
-
+      await profileAPI.get()
       setIsLoading(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load profile")
+      const message = err instanceof Error ? err.message : "Failed to load profile"
+      // Set default values for new profile
       setIsLoading(false)
-    }
-  }
-
-  const handleSavePersonalInfo = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSaving(true)
-    setError("")
-    setSuccess("")
-
-    try {
-      const data = await profileAPI.update({
-        full_name: fullName,
-        phone: phone,
-        address_city: addressCity,
-        address_state: addressState,
-        address_country: addressCountry,
-        linkedin_url: linkedinUrl || undefined,
-        github_url: githubUrl || undefined,
-        portfolio_url: portfolioUrl || undefined,
-      })
-      setProfile(data)
-      setSuccess("Personal information saved!")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleSaveQuestions = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSaving(true)
-    setError("")
-    setSuccess("")
-
-    try {
-      const questions: MandatoryQuestions = {
-        work_authorization: workAuth,
-        veteran_status: veteranStatus,
-        disability_status: disabilityStatus,
-      }
-      const data = await profileAPI.updateQuestions(questions)
-      setProfile(data)
-      setSuccess("Mandatory questions saved!")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const handleSavePreferences = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsSaving(true)
-    setError("")
-    setSuccess("")
-
-    try {
-      const data = await profileAPI.updatePreferences({
-        optimistic_mode: optimisticMode,
-        require_approval: requireApproval,
-      })
-      setProfile(data)
-      setSuccess("Preferences saved!")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to save")
-    } finally {
-      setIsSaving(false)
     }
   }
 
@@ -161,13 +48,12 @@ export default function ProfilePage() {
 
     setIsUploadingResume(true)
     setError("")
-    setSuccess("")
 
     try {
-      const data = await profileAPI.uploadResume(file)
-      setProfile(data)
-      setSuccess("Resume uploaded successfully!")
+      await profileAPI.uploadResume(file)
       setResumeFile(null)
+      // Reload to get fresh data from hook
+      await loadProfile()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to upload resume")
     } finally {
@@ -179,9 +65,9 @@ export default function ProfilePage() {
     if (!confirm("Are you sure you want to delete your resume?")) return
 
     try {
-      const data = await profileAPI.deleteResume()
-      setProfile(data)
-      setSuccess("Resume deleted")
+      await profileAPI.deleteResume()
+      // Reload to get fresh data from hook
+      await loadProfile()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete resume")
     }
@@ -255,13 +141,21 @@ export default function ProfilePage() {
             </Alert>
           )}
 
-          <Button
-            variant="ghost"
-            className="mb-6 bg-slate-900 text-white border border-slate-700 hover:bg-slate-800 hover:border-blue-400"
-            onClick={() => router.push('/')}
-          >
-            ← Back to Dashboard
-          </Button>
+          <div className="mb-6 flex items-center justify-between">
+            <Button
+              variant="ghost"
+              className="bg-slate-900 text-white border border-slate-700 hover:bg-slate-800 hover:border-blue-400"
+              onClick={() => router.push('/')}
+            >
+              ← Back to Dashboard
+            </Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={() => router.push('/profile/edit')}
+            >
+              Edit Profile
+            </Button>
+          </div>
 
           {/* PROFILE VIEW SECTION */}
           <div className="mb-12">
@@ -275,9 +169,19 @@ export default function ProfilePage() {
                 {profile.resume_data ? (
                   <ResumeDataDisplay resume={profile.resume_data} />
                 ) : (
-                  <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-8 text-center">
-                    <FileText className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-                    <p className="text-slate-400">No resume uploaded yet</p>
+                  <div className="bg-slate-900/50 border border-slate-700 border-dashed rounded-lg p-8 text-center hover:bg-slate-900/70 hover:border-slate-600 transition cursor-pointer group"
+                    onClick={() => document.getElementById('resume-upload-input')?.click()}>
+                    <FileText className="w-12 h-12 text-slate-500 mx-auto mb-4 group-hover:text-slate-400 transition" />
+                    <p className="text-slate-400 group-hover:text-slate-300 transition font-medium">Click to upload resume</p>
+                    <p className="text-xs text-slate-500 mt-2">PDF or DOCX (Max 5MB)</p>
+                    <input
+                      id="resume-upload-input"
+                      type="file"
+                      accept=".pdf,.docx"
+                      onChange={handleResumeUpload}
+                      disabled={isUploadingResume}
+                      className="hidden"
+                    />
                   </div>
                 )}
               </div>
@@ -352,277 +256,13 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* EDIT MODE SECTION */}
-          <Card className="bg-slate-900/50 border-slate-700">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Edit2 className="w-5 h-5" />
-                    Edit Profile
-                  </CardTitle>
-                  <CardDescription>Update your personal information and settings</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {error && (
-                <Alert variant="destructive" className="mb-4">
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              {success && (
-                <Alert className="mb-4">
-                  <AlertDescription>{success}</AlertDescription>
-                </Alert>
-              )}
-
-              <Tabs defaultValue="personal">
-                <TabsList className="grid w-full grid-cols-4">
-                  <TabsTrigger value="personal">Personal</TabsTrigger>
-                  <TabsTrigger value="resume">Resume</TabsTrigger>
-                  <TabsTrigger value="questions">Questions</TabsTrigger>
-                  <TabsTrigger value="preferences">Preferences</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="personal" className="space-y-4">
-                  <form onSubmit={handleSavePersonalInfo} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="fullName">Full Name *</Label>
-                        <Input
-                          id="fullName"
-                          value={fullName}
-                          onChange={(e) => setFullName(e.target.value)}
-                          required
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Phone Number *</Label>
-                        <Input
-                          id="phone"
-                          type="tel"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          required
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="city">City</Label>
-                        <Input
-                          id="city"
-                          value={addressCity}
-                          onChange={(e) => setAddressCity(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="state">State</Label>
-                        <Input
-                          id="state"
-                          value={addressState}
-                          onChange={(e) => setAddressState(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="country">Country</Label>
-                        <Input
-                          id="country"
-                          value={addressCountry}
-                          onChange={(e) => setAddressCountry(e.target.value)}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="linkedin">LinkedIn URL</Label>
-                      <Input
-                        id="linkedin"
-                        type="url"
-                        placeholder="https://linkedin.com/in/username"
-                        value={linkedinUrl}
-                        onChange={(e) => setLinkedinUrl(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="github">GitHub URL</Label>
-                      <Input
-                        id="github"
-                        type="url"
-                        placeholder="https://github.com/username"
-                        value={githubUrl}
-                        onChange={(e) => setGithubUrl(e.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="portfolio">Portfolio URL</Label>
-                      <Input
-                        id="portfolio"
-                        type="url"
-                        placeholder="https://yourportfolio.com"
-                        value={portfolioUrl}
-                        onChange={(e) => setPortfolioUrl(e.target.value)}
-                      />
-                    </div>
-
-                    <Button type="submit" disabled={isSaving}>
-                      {isSaving ? "Saving..." : "Save Personal Info"}
-                    </Button>
-                  </form>
-                </TabsContent>
-
-                <TabsContent value="resume" className="space-y-4">
-                  {profile?.resume_uploaded ? (
-                    <div className="border rounded-lg p-4 space-y-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <FileText className="h-8 w-8 text-gray-500" />
-                          <div>
-                            <p className="font-medium">{profile.resume_filename}</p>
-                            <p className="text-sm text-gray-500">
-                              Uploaded {new Date(profile.resume_uploaded_at!).toLocaleDateString()}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex space-x-2">
-                          <Button variant="outline" size="sm" onClick={handleDownloadResume}>
-                            Download
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={handleResumeDelete}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                      <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <Label htmlFor="resume-upload" className="cursor-pointer">
-                        <span className="text-blue-600 hover:text-blue-700">
-                          Click to upload resume
-                        </span>
-                        <span className="text-gray-500"> or drag and drop</span>
-                      </Label>
-                      <p className="text-sm text-gray-500 mt-2">PDF or DOCX, max 5MB</p>
-                      <Input
-                        id="resume-upload"
-                        type="file"
-                        accept=".pdf,.doc,.docx"
-                        className="hidden"
-                        onChange={handleResumeUpload}
-                        disabled={isUploadingResume}
-                      />
-                      {isUploadingResume && <Loader2 className="h-6 w-6 animate-spin mx-auto mt-4" />}
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="questions" className="space-y-4">
-                  <form onSubmit={handleSaveQuestions} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="workAuth">Work Authorization *</Label>
-                      <Select value={workAuth} onValueChange={setWorkAuth} required>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="yes">Authorized to work in US</SelectItem>
-                          <SelectItem value="no">Require sponsorship</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="veteran">Veteran Status *</Label>
-                      <Select value={veteranStatus} onValueChange={setVeteranStatus} required>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="no">Not a veteran</SelectItem>
-                          <SelectItem value="yes">Veteran</SelectItem>
-                          <SelectItem value="decline">Prefer not to answer</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="disability">Disability Status *</Label>
-                      <Select
-                        value={disabilityStatus}
-                        onValueChange={setDisabilityStatus}
-                        required
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="no">No disability</SelectItem>
-                          <SelectItem value="yes">Have a disability</SelectItem>
-                          <SelectItem value="decline">Prefer not to answer</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <Button type="submit" disabled={isSaving}>
-                      {isSaving ? "Saving..." : "Save Questions"}
-                    </Button>
-                  </form>
-                </TabsContent>
-
-                <TabsContent value="preferences" className="space-y-4">
-                  <form onSubmit={handleSavePreferences} className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Optimistic Mode</Label>
-                        <p className="text-sm text-gray-500">
-                          Answer experience questions optimistically when you have related skills
-                        </p>
-                      </div>
-                      <Switch
-                        checked={optimisticMode}
-                        onCheckedChange={setOptimisticMode}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <Label>Require Approval</Label>
-                        <p className="text-sm text-gray-500">
-                          Review applications before final submission
-                        </p>
-                      </div>
-                      <Switch
-                        checked={requireApproval}
-                        onCheckedChange={setRequireApproval}
-                      />
-                    </div>
-
-                    <Button type="submit" disabled={isSaving}>
-                      {isSaving ? "Saving..." : "Save Preferences"}
-                    </Button>
-                  </form>
-                </TabsContent>
-              </Tabs>
-
-              {isOnboarding && profile?.profile_complete && (
-                <div className="mt-6 pt-6 border-t">
-                  <Button onClick={handleContinue} className="w-full">
-                    Continue to Dashboard →
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {isOnboarding && profile?.profile_complete && (
+            <div className="mt-8 text-center">
+              <Button onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-2">
+                Continue to Dashboard →
+              </Button>
+            </div>
+          )}
         </div>
       </div>
     </ProtectedRoute>

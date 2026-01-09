@@ -27,7 +27,7 @@ export default function DashboardPage() {
     data: jobsRaw,
     error: jobsError,
     isLoading: jobsLoading,
-  } = useJobs();
+  } = useJobs({ limit: 1 }); // Only fetch 1 job, we just need the total count
   const {
     data: tasksRaw,
     error: tasksError,
@@ -36,7 +36,8 @@ export default function DashboardPage() {
 
   // Defensive guards for all data
   const runs: ApplicationRun[] = Array.isArray(runsRaw?.runs) ? runsRaw.runs : [];
-  const jobs: JobPosting[] = Array.isArray(jobsRaw) ? jobsRaw : [];
+  const jobs: JobPosting[] = Array.isArray(jobsRaw?.jobs) ? jobsRaw.jobs : [];
+  const totalJobs: number = jobsRaw?.total || 0; // Get total count
   const tasks: ApplicationTask[] = Array.isArray(tasksRaw) ? tasksRaw : [];
 
   // Error Handling
@@ -113,7 +114,7 @@ export default function DashboardPage() {
             <Briefcase className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{jobs.length}</div>
+            <div className="text-2xl font-bold">{totalJobs}</div>
             <p className="text-xs text-muted-foreground">
               {notAppliedJobs} not applied
             </p>
