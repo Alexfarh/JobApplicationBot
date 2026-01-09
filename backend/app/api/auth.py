@@ -2,7 +2,7 @@
 Authentication endpoints for magic link login.
 
 Phase 1: Dev mode - prints magic link to console
-Future: Send email with magic link
+Phase 2: Prod mode - sends email with magic link via SendGrid
 
 Security features:
 - Account lockout after 5 failed attempts (30 min cooldown)
@@ -28,6 +28,7 @@ from app.schemas.auth import (
     VerifyTokenRequest,
     AuthResponse
 )
+from app.services.email import email_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -76,19 +77,18 @@ async def request_magic_link(
         # Build magic link URL (uses frontend URL from config)
         magic_link = f"{settings.get_frontend_url()}/auth/verify?token={user.magic_link_token}"
         
-        # Dev mode: print to console
-        if settings.email_mode == "dev":
-            logger.info(
-                f"Magic link generated for {user.email}: {magic_link} "
-                f"(expires: {user.magic_link_expires_at})"
+        # Send magic link via email (dev or prod mode)
+        email_sent = await email_service.send_magic_link_email(user.email, magic_link)
+        
+        if not email_sent and settings.email_mode == "prod":
+            logger.error(f"Failed to send magic link email to {user.email}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to send magic link email. Please try again."
             )
-        else:
-            # Production: send email
-            # TODO: Implement email sending in future phase
-            pass
         
         return MagicLinkResponse(
-            message="Magic link sent! Check your email (or console in dev mode).",
+            message="Magic link sent! Check your email.",
             email=user.email
         )
     

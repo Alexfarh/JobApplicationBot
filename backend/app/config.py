@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     
     # Email
     email_mode: str = "dev"  # dev | prod
+    sendgrid_api_key: str = ""  # Required for prod mode
     
     # Auth
     secret_key: str
